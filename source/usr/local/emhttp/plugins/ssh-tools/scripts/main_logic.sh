@@ -173,19 +173,49 @@ test_single_ssh_connection() {
 list_exchanged_keys() {
     if [[ -f "$EXCHANGED_KEYS_FILE" ]]; then
         echo "<h4>Successfully Exchanged Keys:</h4>"
-        echo "<div style='font-family: monospace; font-size: 12px;'>"
         
         if [[ -s "$EXCHANGED_KEYS_FILE" ]]; then
+            echo "<div style='margin-bottom: 15px;'>"
+            
             while IFS= read -r line; do
-                echo "<div style='margin-bottom: 5px; padding: 5px; border-left: 3px solid #28a745;'>$line</div>"
+                if [[ -n "$line" ]]; then
+                    # Parse the line: "YYYY-MM-DD HH:MM:SS user@host"
+                    local timestamp=$(echo "$line" | awk '{print $1, $2}')
+                    local connection=$(echo "$line" | awk '{print $3}')
+                    local username=$(echo "$connection" | cut -d'@' -f1)
+                    local hostname=$(echo "$connection" | cut -d'@' -f2)
+                    
+                    # Test if connection is still active
+                    local status_color="#28a745"
+                    local status_text="✓ Active"
+                    if ! ssh -o BatchMode=yes -o ConnectTimeout=3 "${connection}" true 2>/dev/null; then
+                        status_color="#dc3545"
+                        status_text="✗ Inactive"
+                    fi
+                    
+                    echo "<div style='margin-bottom: 10px; padding: 12px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;'>"
+                    echo "  <div style='display: flex; justify-content: space-between; align-items: center;'>"
+                    echo "    <div>"
+                    echo "      <strong style='color: #333;'>$hostname</strong>"
+                    echo "      <span style='color: #666; margin-left: 10px;'>User: $username</span>"
+                    echo "      <div style='font-size: 11px; color: #888; margin-top: 2px;'>Exchanged: $timestamp</div>"
+                    echo "    </div>"
+                    echo "    <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
+                    echo "  </div>"
+                    echo "</div>"
+                fi
             done < "$EXCHANGED_KEYS_FILE"
+            
+            echo "</div>"
         else
-            echo "<div style='color: #666; font-style: italic;'>No SSH keys have been exchanged yet.</div>"
+            echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
+            echo "No SSH keys have been exchanged yet.<br>Use the 'Exchange SSH Keys' tab to add your first connection."
+            echo "</div>"
         fi
-        
-        echo "</div>"
     else
-        echo "<div style='color: #666; font-style: italic;'>No SSH keys have been exchanged yet.</div>"
+        echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
+        echo "No SSH keys have been exchanged yet.<br>Use the 'Exchange SSH Keys' tab to add your first connection."
+        echo "</div>"
     fi
 }
 

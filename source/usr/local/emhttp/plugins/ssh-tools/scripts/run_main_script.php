@@ -2,9 +2,17 @@
 // Main PHP backend script
 require_once '/usr/local/emhttp/webGui/include/Helpers.php';
 
-// CSRF Protection
-if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-    echo "Error: Invalid CSRF token";
+// Initialize session if not already started
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
+
+// CSRF Protection - Use Unraid's CSRF system
+$expected_token = $var['csrf_token'] ?? $_SESSION['csrf_token'] ?? '';
+$provided_token = $_POST['csrf_token'] ?? '';
+
+if (empty($expected_token) || empty($provided_token) || $provided_token !== $expected_token) {
+    echo "Error: Invalid CSRF token (expected: " . substr($expected_token, 0, 8) . "..., got: " . substr($provided_token, 0, 8) . "...)";
     exit;
 }
 

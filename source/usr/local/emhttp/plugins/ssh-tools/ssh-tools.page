@@ -155,6 +155,10 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
       <dt>Password</dt>
       <dd>
         <input type="password" id="remotePassword" class="short" placeholder="Password for authentication">
+        <div style="margin-top: 5px;">
+          <input type="checkbox" id="showPassword" onchange="togglePasswordVisibility()">
+          <label for="showPassword" style="margin-left: 5px;">Show password</label>
+        </div>
         <div class="description">Password for the remote user (required for initial key exchange)</div>
       </dd>
     </dl>
@@ -164,7 +168,7 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
       <dd>
         <span class="buttons-spaced">
           <button type="button" onclick="testConnection()" id="testBtn">Test Connection</button>
-          <button type="button" onclick="exchangeSSHKeys()" id="exchangeBtn">Exchange SSH Keys</button>
+          <button type="button" onclick="exchangeSSHKeys()" id="exchangeBtn">Exchange SSH Keys Now</button>
         </span>
         <div class="description">Test the connection first, then exchange keys for passwordless SSH access</div>
       </dd>
@@ -253,6 +257,18 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
 <script>
 // Make CSRF token available to JavaScript
 var csrf_token = '<?=$csrf_token?>';
+
+// Password visibility toggle
+function togglePasswordVisibility() {
+  const passwordField = document.getElementById('remotePassword');
+  const showPasswordCheckbox = document.getElementById('showPassword');
+  
+  if (showPasswordCheckbox.checked) {
+    passwordField.type = 'text';
+  } else {
+    passwordField.type = 'password';
+  }
+}
 
 // Tab functionality
 function showTab(tabId) {
@@ -497,11 +513,20 @@ $(document).ready(function() {
   // Welcome message
   setStatus('SSH Tools plugin initialized successfully', 'success');
   updateStatus('Initializing SSH key management interface...');
+  updateStatus('CSRF token initialized: ' + (csrf_token ? csrf_token.substring(0, 8) + '...' : 'MISSING'));
+  
+  // Ensure we start on the exchange tab
+  showTab('exchange');
   
   // Load initial data
   checkKeyStatus();
   refreshExchangedKeys();
   
   updateStatus('Ready for SSH key operations');
+  
+  // Add click handlers for tab buttons to ensure they work
+  $('#btn-exchange').click(function() { showTab('exchange'); });
+  $('#btn-keys').click(function() { showTab('keys'); });
+  $('#btn-status').click(function() { showTab('status'); });
 });
 </script>
