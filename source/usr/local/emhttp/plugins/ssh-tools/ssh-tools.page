@@ -474,12 +474,16 @@ function scanForSSH() {
 function executeOperation(operation, data, successCallback, errorCallback) {
   const postData = {
     operation: operation,
+    csrf_token: csrf_token || '',
     ...data
   };
   
-  if (csrf_token) {
-    postData.csrf_token = csrf_token;
-  }
+  // Debug logging
+  console.log('Sending AJAX request:', {
+    operation: operation,
+    csrf_token: postData.csrf_token ? postData.csrf_token.substring(0, 8) + '...' : 'EMPTY',
+    data: data
+  });
   
   $.ajax({
     url: '/plugins/ssh-tools/scripts/run_main_script.php',
