@@ -304,7 +304,7 @@ function updateStatus(message, type = 'info') {
   
   statusOutput.textContent += formattedMessage + '\n';
   statusOutput.scrollTop = statusOutput.scrollHeight;
-  showTab('status');
+  // Don't automatically switch to status tab - let user stay on current tab
 }
 
 function setStatus(message, type = 'info') {
@@ -314,7 +314,7 @@ function setStatus(message, type = 'info') {
   
   statusOutput.textContent = formattedMessage + '\n';
   statusOutput.scrollTop = statusOutput.scrollHeight;
-  showTab('status');
+  // Don't automatically switch to status tab - let user stay on current tab
 }
 
 function clearStatus() {
@@ -514,19 +514,18 @@ function executeOperation(operation, data, successCallback, errorCallback) {
 
 // Initialize the interface
 $(document).ready(function() {
-  // Welcome message
-  setStatus('SSH Tools plugin initialized successfully', 'success');
-  updateStatus('Initializing SSH key management interface...');
-  updateStatus('CSRF token initialized: ' + (csrf_token ? csrf_token.substring(0, 8) + '...' : 'MISSING'));
-  
-  // Ensure we start on the exchange tab
-  showTab('exchange');
-  
-  // Load initial data
+  // Load initial data silently
   checkKeyStatus();
   refreshExchangedKeys();
   
+  // Welcome message - add to status but don't switch to it
+  updateStatus('SSH Tools plugin initialized successfully');
+  updateStatus('Initializing SSH key management interface...');
+  updateStatus('CSRF token initialized: ' + (csrf_token ? csrf_token.substring(0, 8) + '...' : 'MISSING'));
   updateStatus('Ready for SSH key operations');
+  
+  // Start on the exchange tab after initialization
+  showTab('exchange');
   
   // Add click handlers for tab buttons to ensure they work
   $('#btn-exchange').click(function() { showTab('exchange'); });
