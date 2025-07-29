@@ -1,0 +1,494 @@
+<?PHP
+$plugin = "ssh-tools";
+require_once "$docroot/webGui/include/Wrappers.php";
+?>
+
+<div style="margin-bottom: 20px;">
+<strong>SSH Tools v<?=exec("cat /boot/config/plugins/$plugin/VERSION 2>/dev/null || echo 'Unknown'")?></strong>
+</div>
+
+<div style="margin-bottom: 20px; color: var(--text-color);">
+Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remote machines, track connections, and manage SSH utilities. Essential for ZFS replication, rsync backups, and secure remote access.
+</div>
+
+<style>
+/* Tab navigation styling */
+.tab-nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.tab-nav button {
+  display: block;
+  padding: 10px 20px;
+  background: transparent;
+  border: 2px solid #F15A2C;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 6px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.tab-nav button.active {
+  background: #F15A2C;
+  border: 2px solid #F15A2C;
+  color: #ffffff;
+  font-weight: bold;
+}
+
+.tab-content {
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+/* Status output styling - theme neutral */
+#statusOutput {
+  padding: 15px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+  min-height: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: 'Courier New', monospace;
+}
+
+/* Loading spinner */
+.loading-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #F15A2C;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Status indicators */
+.status-success {
+  color: #28a745;
+  font-weight: bold;
+}
+
+.status-error {
+  color: #dc3545;
+  font-weight: bold;
+}
+
+.status-warning {
+  color: #ffc107;
+  font-weight: bold;
+}
+
+.status-info {
+  color: #17a2b8;
+  font-weight: bold;
+}
+
+/* Button loading state */
+.button-loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+</style>
+
+<!-- Tab Navigation -->
+<div class="tab-nav">
+  <button type="button" onclick="showTab('exchange')" id="btn-exchange" class="active">EXCHANGE SSH KEYS</button>
+  <button type="button" onclick="showTab('keys')" id="btn-keys">EXCHANGED KEYS</button>
+  <button type="button" onclick="showTab('status')" id="btn-status">STATUS</button>
+</div>
+
+<!-- SSH Key Exchange Tab -->
+<div id="content-exchange" class="tab-content active">
+  <h2>SSH Key Exchange</h2>
+  
+  <div style="margin-bottom: 15px; padding: 10px; border-radius: 5px; border-left: 4px solid #FF9800;">
+    <strong>Note:</strong> This will generate an ed25519 SSH key if one doesn't exist, then exchange it with the target machine. 
+    Essential for passwordless SSH connections needed for ZFS replication, rsync, and remote management.
+  </div>
+  
+  <form onsubmit="return false;">
+    <dl>
+      <dt>Remote Host IP/Hostname</dt>
+      <dd>
+        <input type="text" id="remoteHost" class="short" placeholder="192.168.1.100 or hostname">
+        <div class="description">IP address or hostname of the target machine</div>
+      </dd>
+    </dl>
+    
+    <dl>
+      <dt>Username</dt>
+      <dd>
+        <input type="text" id="remoteUsername" class="short" value="root" placeholder="root">
+        <div class="description">Username on the target machine (default: root for Unraid servers)</div>
+      </dd>
+    </dl>
+    
+    <dl>
+      <dt>Password</dt>
+      <dd>
+        <input type="password" id="remotePassword" class="short" placeholder="Password for authentication">
+        <div class="description">Password for the remote user (required for initial key exchange)</div>
+      </dd>
+    </dl>
+    
+    <dl>
+      <dt>&nbsp;</dt>
+      <dd>
+        <span class="buttons-spaced">
+          <button type="button" onclick="testConnection()" id="testBtn">Test Connection</button>
+          <button type="button" onclick="exchangeSSHKeys()" id="exchangeBtn">Exchange SSH Keys</button>
+        </span>
+        <div class="description">Test the connection first, then exchange keys for passwordless SSH access</div>
+      </dd>
+    </dl>
+  </form>
+  
+  <h3>Current SSH Key Status</h3>
+  <dl>
+    <dt>Local SSH Key</dt>
+    <dd>
+      <div style="margin-bottom: 10px;">
+        <span id="keyStatus">Checking...</span>
+      </div>
+      <span><button type="button" onclick="checkKeyStatus()">Refresh Status</button></span>
+      <div class="description">Status of your Unraid server's SSH key</div>
+    </dd>
+  </dl>
+</div>
+
+<!-- Exchanged Keys Tab -->
+<div id="content-keys" class="tab-content">
+  <h2>Exchanged SSH Keys</h2>
+  
+  <p>Track and manage machines where SSH keys have been successfully exchanged.</p>
+  
+  <dl>
+    <dt>&nbsp;</dt>
+    <dd>
+      <span class="buttons-spaced">
+        <button type="button" onclick="refreshExchangedKeys()">Refresh List</button>
+        <button type="button" onclick="testAllConnections()">Test All Connections</button>
+      </span>
+      <div class="description">Manage your exchanged SSH keys and test connectivity</div>
+    </dd>
+  </dl>
+  
+  <div style="margin-top: 20px;">
+    <h3>Exchanged Keys</h3>
+    <div id="exchangedKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
+      Loading exchanged keys...
+    </div>
+  </div>
+  
+  <div style="margin-top: 20px;">
+    <h3>SSH Tools</h3>
+    <dl>
+      <dt>Connection Testing</dt>
+      <dd>
+        <input type="text" id="testHost" class="short" placeholder="IP or hostname to test">
+        <div style="margin-top: 5px;">
+          <span><button type="button" onclick="testSingleConnection()">Test Connection</button></span>
+        </div>
+        <div class="description">Test SSH connectivity to a specific host</div>
+      </dd>
+    </dl>
+    
+    <dl>
+      <dt>Network Scan</dt>
+      <dd>
+        <input type="text" id="scanNetwork" class="short" placeholder="192.168.1.0/24" value="192.168.1.0/24">
+        <div style="margin-top: 5px;">
+          <span><button type="button" onclick="scanForSSH()">Scan for SSH</button></span>
+        </div>
+        <div class="description">Scan network range for SSH services</div>
+      </dd>
+    </dl>
+  </div>
+</div>
+
+<!-- Status Tab -->
+<div id="content-status" class="tab-content">
+  <h2>Status</h2>
+  
+  <p>Operation output and status information will be displayed here.</p>
+  
+  <dl>
+    <dt>&nbsp;</dt>
+    <dd>
+      <span><button type="button" onclick="clearStatus()">Clear Output</button></span>
+    </dd>
+  </dl>
+  
+  <pre id="statusOutput">No operations performed yet. Output from plugin operations will appear here.</pre>
+</div>
+
+<script>
+// Make CSRF token available to JavaScript
+var csrf_token = '<?=$csrf_token?>';
+
+// Tab functionality
+function showTab(tabId) {
+  // Hide all tab content
+  const contents = document.querySelectorAll('.tab-content');
+  contents.forEach(content => {
+    content.classList.remove('active');
+  });
+  
+  // Remove active class from all buttons
+  const buttons = document.querySelectorAll('.tab-nav button');
+  buttons.forEach(button => {
+    button.classList.remove('active');
+  });
+  
+  // Show selected tab and activate button
+  document.getElementById('content-' + tabId).classList.add('active');
+  document.getElementById('btn-' + tabId).classList.add('active');
+  
+  // Refresh data when switching to certain tabs
+  if (tabId === 'keys') {
+    refreshExchangedKeys();
+  } else if (tabId === 'exchange') {
+    checkKeyStatus();
+  }
+}
+
+// Status functions with enhanced formatting
+function updateStatus(message, type = 'info') {
+  const statusOutput = document.getElementById('statusOutput');
+  const timestamp = new Date().toLocaleTimeString();
+  const formattedMessage = `[${timestamp}] ${message}`;
+  
+  statusOutput.textContent += formattedMessage + '\n';
+  statusOutput.scrollTop = statusOutput.scrollHeight;
+  showTab('status');
+}
+
+function setStatus(message, type = 'info') {
+  const statusOutput = document.getElementById('statusOutput');
+  const timestamp = new Date().toLocaleTimeString();
+  const formattedMessage = `[${timestamp}] ${message}`;
+  
+  statusOutput.textContent = formattedMessage + '\n';
+  statusOutput.scrollTop = statusOutput.scrollHeight;
+  showTab('status');
+}
+
+function clearStatus() {
+  document.getElementById('statusOutput').textContent = 'Output cleared.\n';
+}
+
+// Button loading state management
+function setButtonLoading(buttonId, loading = true) {
+  const button = document.getElementById(buttonId);
+  if (!button) return;
+  
+  if (loading) {
+    button.classList.add('button-loading');
+    button.innerHTML = '<span class="loading-spinner"></span>' + button.textContent;
+  } else {
+    button.classList.remove('button-loading');
+    // Remove spinner if present
+    const spinner = button.querySelector('.loading-spinner');
+    if (spinner) {
+      spinner.remove();
+    }
+  }
+}
+
+// Enhanced status update with auto-categorization
+function smartUpdateStatus(message) {
+  let type = 'info';
+  
+  if (message.toLowerCase().includes('error') || message.toLowerCase().includes('failed')) {
+    type = 'error';
+  } else if (message.toLowerCase().includes('success') || message.toLowerCase().includes('completed') || message.toLowerCase().includes('✓')) {
+    type = 'success';
+  } else if (message.toLowerCase().includes('warning') || message.toLowerCase().includes('⚠')) {
+    type = 'warning';
+  }
+  
+  updateStatus(message, type);
+}
+
+// SSH Key Management Functions
+function checkKeyStatus() {
+  updateStatus('Checking SSH key status...');
+  
+  executeOperation('check_key_status', {}, function(response) {
+    document.getElementById('keyStatus').textContent = response.trim();
+    smartUpdateStatus('SSH key status updated');
+  });
+}
+
+function testConnection() {
+  const host = document.getElementById('remoteHost').value;
+  const username = document.getElementById('remoteUsername').value;
+  const password = document.getElementById('remotePassword').value;
+  
+  if (!host || !username || !password) {
+    setStatus('Error: Please fill in all fields for connection testing', 'error');
+    return;
+  }
+  
+  setButtonLoading('testBtn', true);
+  updateStatus('Testing connection to ' + host + '...');
+  
+  const postData = {
+    host: host,
+    username: username,
+    password: password
+  };
+  
+  executeOperation('test_connection', postData, function(response) {
+    setButtonLoading('testBtn', false);
+    smartUpdateStatus(response);
+  }, function() {
+    setButtonLoading('testBtn', false);
+  });
+}
+
+function exchangeSSHKeys() {
+  const host = document.getElementById('remoteHost').value;
+  const username = document.getElementById('remoteUsername').value;
+  const password = document.getElementById('remotePassword').value;
+  
+  if (!host || !username || !password) {
+    setStatus('Error: Please fill in all fields to exchange SSH keys', 'error');
+    return;
+  }
+  
+  if (!confirm('This will exchange SSH keys with ' + host + '. Continue?')) {
+    return;
+  }
+  
+  setButtonLoading('exchangeBtn', true);
+  updateStatus('Exchanging SSH keys with ' + host + '...');
+  
+  const postData = {
+    host: host,
+    username: username,
+    password: password
+  };
+  
+  executeOperation('exchange_keys', postData, function(response) {
+    setButtonLoading('exchangeBtn', false);
+    smartUpdateStatus(response);
+    
+    // Refresh the key status and exchanged keys list after successful exchange
+    setTimeout(function() {
+      checkKeyStatus();
+      refreshExchangedKeys();
+    }, 1000);
+  }, function() {
+    setButtonLoading('exchangeBtn', false);
+  });
+}
+
+function refreshExchangedKeys() {
+  document.getElementById('exchangedKeysList').innerHTML = '<div class="loading-spinner"></div>Loading exchanged keys...';
+  
+  executeOperation('list_exchanged_keys', {}, function(response) {
+    document.getElementById('exchangedKeysList').innerHTML = response;
+    smartUpdateStatus('Exchanged keys list updated');
+  }, function() {
+    document.getElementById('exchangedKeysList').innerHTML = '<div style="color: #dc3545;">Error loading exchanged keys</div>';
+  });
+}
+
+function testAllConnections() {
+  updateStatus('Testing all exchanged connections...');
+  executeOperation('test_all_connections', {});
+}
+
+function testSingleConnection() {
+  const host = document.getElementById('testHost').value;
+  
+  if (!host) {
+    setStatus('Error: Please enter a host to test');
+    return;
+  }
+  
+  updateStatus('Testing connection to ' + host + '...');
+  
+  executeOperation('test_single_connection', { host: host });
+}
+
+function scanForSSH() {
+  const network = document.getElementById('scanNetwork').value;
+  
+  if (!network) {
+    setStatus('Error: Please enter a network range to scan');
+    return;
+  }
+  
+  updateStatus('Scanning ' + network + ' for SSH services...');
+  
+  executeOperation('scan_ssh', { network: network });
+}
+
+// Helper function for AJAX operations
+function executeOperation(operation, data, successCallback, errorCallback) {
+  const postData = {
+    operation: operation,
+    ...data
+  };
+  
+  if (csrf_token) {
+    postData.csrf_token = csrf_token;
+  }
+  
+  $.ajax({
+    url: '/plugins/ssh-tools/scripts/run_main_script.php',
+    type: 'POST',
+    data: postData,
+    success: function(response) {
+      // Check if response contains error
+      if (response.toLowerCase().includes('error:')) {
+        smartUpdateStatus(response);
+      } else {
+        smartUpdateStatus(response);
+      }
+      
+      if (successCallback) {
+        successCallback(response);
+      }
+    },
+    error: function(xhr, status, error) {
+      const errorMessage = 'Error: Failed to execute ' + operation + ' (' + status + ')';
+      setStatus(errorMessage, 'error');
+      
+      if (errorCallback) {
+        errorCallback(error);
+      }
+    }
+  });
+}
+
+// Initialize the interface
+$(document).ready(function() {
+  // Welcome message
+  setStatus('SSH Tools plugin initialized successfully', 'success');
+  updateStatus('Initializing SSH key management interface...');
+  
+  // Load initial data
+  checkKeyStatus();
+  refreshExchangedKeys();
+  
+  updateStatus('Ready for SSH key operations');
+});
+</script>

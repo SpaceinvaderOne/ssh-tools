@@ -1,0 +1,312 @@
+#!/bin/bash
+
+# SSH Tools Plugin - Main Logic Script
+# Handles SSH key generation, exchange, and management operations
+
+set -e
+
+# Constants
+SSH_KEY_TYPE="ed25519"
+SSH_KEY_PATH="/root/.ssh/id_${SSH_KEY_TYPE}"
+SSH_PUB_KEY_PATH="${SSH_KEY_PATH}.pub"
+PLUGIN_DATA_DIR="/boot/config/plugins/ssh-tools"
+EXCHANGED_KEYS_FILE="${PLUGIN_DATA_DIR}/exchanged_keys.txt"
+
+# Helper functions
+error_exit() {
+    echo "Error: $1" >&2
+    exit 1
+}
+
+debug_log() {
+    echo "DEBUG: $1" >&2
+}
+
+log_info() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+# Ensure plugin data directory exists
+ensure_data_dir() {
+    if [[ ! -d "$PLUGIN_DATA_DIR" ]]; then
+        mkdir -p "$PLUGIN_DATA_DIR"
+        debug_log "Created plugin data directory: $PLUGIN_DATA_DIR"
+    fi
+}
+
+# Validate environment
+validate_environment() {
+    if [[ -z "$OPERATION" ]]; then
+        error_exit "No operation specified"
+    fi
+    
+    debug_log "Operation: $OPERATION"
+    ensure_data_dir
+}
+
+# Check if SSH key exists and generate if needed
+check_or_generate_ssh_key() {
+    if [[ ! -f "$SSH_KEY_PATH" ]]; then
+        log_info "Generating new ${SSH_KEY_TYPE} SSH key..."
+        ssh-keygen -t "$SSH_KEY_TYPE" -f "$SSH_KEY_PATH" -N "" -C "unraid-ssh-tools-$(hostname)"
+        log_info "SSH key generated successfully"
+        return 0
+    else
+        debug_log "SSH key already exists at $SSH_KEY_PATH"
+        return 1
+    fi
+}
+
+# Get SSH key status information
+get_key_status() {
+    if [[ -f "$SSH_KEY_PATH" ]] && [[ -f "$SSH_PUB_KEY_PATH" ]]; then
+        local fingerprint=$(ssh-keygen -lf "$SSH_PUB_KEY_PATH" 2>/dev/null | awk '{print $2}')
+        echo "SSH key exists - Fingerprint: $fingerprint"
+    else
+        echo "No SSH key found - will be generated when needed"
+    fi
+}
+
+# Test SSH connection (with password authentication)
+test_ssh_connection() {
+    local host="$1"
+    local username="$2"
+    local password="$3"
+    
+    log_info "Testing SSH connection to ${username}@${host}..."
+    
+    # Use sshpass to test password authentication
+    if command -v sshpass >/dev/null 2>&1; then
+        if sshpass -p "$password" ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=no "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
+            log_info "Connection test to ${username}@${host} succeeded"
+            return 0
+        else
+            log_info "Connection test to ${username}@${host} failed"
+            return 1
+        fi
+    else
+        # Fallback: Install sshpass if needed
+        log_info "Installing sshpass for password authentication..."
+        if command -v apk >/dev/null 2>&1; then
+            apk add --no-cache sshpass >/dev/null 2>&1 || true
+        fi
+        
+        # Retry with sshpass
+        if command -v sshpass >/dev/null 2>&1; then
+            if sshpass -p "$password" ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=no "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
+                log_info "Connection test to ${username}@${host} succeeded"
+                return 0
+            fi
+        fi
+        
+        log_info "Connection test to ${username}@${host} failed - sshpass may not be available"
+        return 1
+    fi
+}
+
+# Exchange SSH keys with remote host
+exchange_ssh_keys() {
+    local host="$1"
+    local username="$2"
+    local password="$3"
+    
+    log_info "Starting SSH key exchange with ${username}@${host}..."
+    
+    # Ensure SSH key exists
+    check_or_generate_ssh_key
+    
+    # Check if keys are already exchanged
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+        log_info "SSH keys already exchanged with ${username}@${host}"
+        return 0
+    fi
+    
+    # Test connection first
+    if ! test_ssh_connection "$host" "$username" "$password"; then
+        error_exit "Cannot connect to ${username}@${host} with provided credentials"
+    fi
+    
+    # Exchange keys using ssh-copy-id with sshpass
+    log_info "Exchanging SSH keys with ${username}@${host}..."
+    
+    if command -v sshpass >/dev/null 2>&1; then
+        if sshpass -p "$password" ssh-copy-id -f -o StrictHostKeyChecking=no -i "$SSH_PUB_KEY_PATH" "${username}@${host}" 2>/dev/null; then
+            log_info "SSH key successfully copied to ${username}@${host}"
+        else
+            error_exit "Failed to copy SSH key to ${username}@${host}"
+        fi
+    else
+        error_exit "sshpass not available for SSH key exchange"
+    fi
+    
+    # Update known_hosts to fix Unraid-specific issue
+    log_info "Updating known_hosts file..."
+    ssh-keyscan -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+    
+    # Verify the key exchange worked
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+        log_info "SSH key exchange completed successfully!"
+        
+        # Record the successful exchange
+        echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}" >> "$EXCHANGED_KEYS_FILE"
+        
+        return 0
+    else
+        error_exit "SSH key exchange failed - cannot connect without password"
+    fi
+}
+
+# Test a single SSH connection (key-based)
+test_single_ssh_connection() {
+    local host="$1"
+    
+    log_info "Testing SSH connection to $host..."
+    
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 root@"$host" "echo 'SSH connection successful'" 2>/dev/null; then
+        log_info "SSH connection to $host successful (key-based authentication)"
+    else
+        log_info "SSH connection to $host failed (no key-based access)"
+    fi
+}
+
+# List exchanged SSH keys
+list_exchanged_keys() {
+    if [[ -f "$EXCHANGED_KEYS_FILE" ]]; then
+        echo "<h4>Successfully Exchanged Keys:</h4>"
+        echo "<div style='font-family: monospace; font-size: 12px;'>"
+        
+        if [[ -s "$EXCHANGED_KEYS_FILE" ]]; then
+            while IFS= read -r line; do
+                echo "<div style='margin-bottom: 5px; padding: 5px; border-left: 3px solid #28a745;'>$line</div>"
+            done < "$EXCHANGED_KEYS_FILE"
+        else
+            echo "<div style='color: #666; font-style: italic;'>No SSH keys have been exchanged yet.</div>"
+        fi
+        
+        echo "</div>"
+    else
+        echo "<div style='color: #666; font-style: italic;'>No SSH keys have been exchanged yet.</div>"
+    fi
+}
+
+# Test all previously exchanged connections
+test_all_connections() {
+    if [[ ! -f "$EXCHANGED_KEYS_FILE" ]] || [[ ! -s "$EXCHANGED_KEYS_FILE" ]]; then
+        log_info "No exchanged keys to test"
+        return 0
+    fi
+    
+    log_info "Testing all exchanged SSH connections..."
+    
+    local success_count=0
+    local total_count=0
+    
+    while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+            # Extract host from the line (format: "YYYY-MM-DD HH:MM:SS user@host")
+            local host_info=$(echo "$line" | awk '{print $3}')
+            local host=$(echo "$host_info" | cut -d'@' -f2)
+            local username=$(echo "$host_info" | cut -d'@' -f1)
+            
+            ((total_count++))
+            
+            if ssh -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+                log_info "✓ Connection to ${username}@${host} successful"
+                ((success_count++))
+            else
+                log_info "✗ Connection to ${username}@${host} failed"
+            fi
+        fi
+    done < "$EXCHANGED_KEYS_FILE"
+    
+    log_info "Connection test complete: $success_count/$total_count connections successful"
+}
+
+# Scan network for SSH services
+scan_for_ssh() {
+    local network="$1"
+    
+    log_info "Scanning $network for SSH services..."
+    
+    # Use nmap if available, otherwise use basic network scanning
+    if command -v nmap >/dev/null 2>&1; then
+        nmap -p 22 --open "$network" 2>/dev/null | grep -E "(Nmap scan report|22/tcp)" | sed 's/Nmap scan report for //' | awk '/report/{host=$0} /22\/tcp/{print host " - SSH open"}'
+    else
+        # Basic ping sweep for the network (simplified)
+        log_info "nmap not available, performing basic network scan..."
+        
+        # Extract network base (assuming /24)
+        local base=$(echo "$network" | cut -d'.' -f1-3)
+        local tested=0
+        local found=0
+        
+        for i in {1..254}; do
+            local ip="${base}.${i}"
+            if timeout 2 bash -c "</dev/tcp/${ip}/22" 2>/dev/null; then
+                log_info "✓ SSH service found on $ip"
+                ((found++))
+            fi
+            ((tested++))
+            
+            # Progress indicator every 50 hosts
+            if ((tested % 50 == 0)); then
+                log_info "Scanned $tested hosts, found $found SSH services so far..."
+            fi
+        done
+        
+        log_info "Network scan complete: found $found SSH services out of $tested hosts"
+    fi
+}
+
+# Main logic dispatcher
+process_operation() {
+    local operation="$1"
+    
+    case "$operation" in
+        "check_key_status")
+            get_key_status
+            ;;
+        "test_connection")
+            if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USERNAME" ]] || [[ -z "$REMOTE_PASSWORD" ]]; then
+                error_exit "Missing required parameters for connection test"
+            fi
+            test_ssh_connection "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PASSWORD"
+            ;;
+        "exchange_keys")
+            if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USERNAME" ]] || [[ -z "$REMOTE_PASSWORD" ]]; then
+                error_exit "Missing required parameters for key exchange"
+            fi
+            exchange_ssh_keys "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PASSWORD"
+            ;;
+        "test_single_connection")
+            if [[ -z "$TEST_HOST" ]]; then
+                error_exit "Missing host parameter for connection test"
+            fi
+            test_single_ssh_connection "$TEST_HOST"
+            ;;
+        "list_exchanged_keys")
+            list_exchanged_keys
+            ;;
+        "test_all_connections")
+            test_all_connections
+            ;;
+        "scan_ssh")
+            if [[ -z "$SCAN_NETWORK" ]]; then
+                error_exit "Missing network parameter for SSH scan"
+            fi
+            scan_for_ssh "$SCAN_NETWORK"
+            ;;
+        *)
+            error_exit "Unknown operation: $operation"
+            ;;
+    esac
+}
+
+# Main execution
+main() {
+    validate_environment
+    process_operation "$OPERATION"
+}
+
+# Execute main function
+main "$@"

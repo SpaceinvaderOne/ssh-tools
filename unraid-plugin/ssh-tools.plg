@@ -1,0 +1,126 @@
+<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE PLUGIN [
+<!ENTITY name                 "ssh-tools">
+<!ENTITY author               "SpaceInvaderOne">
+<!ENTITY plugin_version       "2025.07.29.1230">
+<!ENTITY launch_page          "Settings/&name;">
+<!ENTITY plugin_url           "https://github.com/SpaceinvaderOne/Ssh_tools/raw/main/packages/pluginmain/ssh-tools-2025.07.29.1230-x86_64.txz">
+<!ENTITY plugin_md5           "ad182babff40a2b907574064bd5d57b4">
+]>
+
+<PLUGIN name="&name;" author="&author;" version="&plugin_version;" min="6.9.0" launch="&launch_page;" icon="gear">
+
+<CHANGES>
+### 2025.01.29
+- Initial release of SSH Tools plugin for Unraid
+- GUI interface for SSH key exchange with remote machines
+- Automatic ed25519 key generation and management
+- Track exchanged SSH keys and connection status
+- Additional SSH utilities for connection testing and network scanning
+- Responsive design compatible with mobile devices
+- Based on proven SSH key exchange workflow used in ZFS replication and rsync
+</CHANGES>
+
+<!-- 
+  This file is the installer for the plugin. It downloads a .txz package,
+  which contains all the necessary PHP, HTML, and Shell scripts, and installs
+  them to the correct locations on your Unraid server.
+-->
+
+<!-- INSTALLATION: Downloads and installs the main plugin package. -->
+
+<!-- Step 1: Remove any previous installation of this plugin to ensure a clean install. -->
+<FILE Run="/bin/bash">
+<INLINE>
+removepkg &name;-&plugin_version;-x86_64
+</INLINE>
+</FILE>
+
+<!-- Step 2: Download and install the new package. -->
+<FILE Name="/boot/config/plugins/&name;/&name;-&plugin_version;-x86_64.txz" Run="upgradepkg --install-new">
+  <URL>&plugin_url;</URL>
+  <MD5>&plugin_md5;</MD5>
+</FILE>
+
+<!-- POST-INSTALL: Setup plugin scripts and persistent files -->
+<FILE Run="/bin/bash">
+<INLINE><![CDATA[
+echo ""
+echo "----------------------------------------------------"
+echo " Setting up plugin scripts and persistent files..."
+echo "----------------------------------------------------"
+
+PLUGIN_SCRIPTS_DIR="/usr/local/emhttp/plugins/ssh-tools/scripts"
+PERSISTENT_DIR="/boot/config/plugins/ssh-tools"
+
+# Create persistent directory
+mkdir -p "$PERSISTENT_DIR"
+echo " Created persistent directory: $PERSISTENT_DIR"
+
+# Create version file for display in plugin UI
+PACKAGE_FILE=$(ls "$PERSISTENT_DIR"/ssh-tools-*.txz 2>/dev/null | head -1)
+if [[ -n "$PACKAGE_FILE" ]]; then
+    VERSION=$(basename "$PACKAGE_FILE" | sed 's/ssh-tools-\(.*\)-x86_64\.txz/\1/')
+    echo "$VERSION" > "$PERSISTENT_DIR/VERSION"
+    echo " Created version file: $PERSISTENT_DIR/VERSION (version: $VERSION)"
+else
+    echo "Unknown" > "$PERSISTENT_DIR/VERSION"
+    echo " Warning: Could not determine version, set to Unknown"
+fi
+
+# Set executable permissions on plugin scripts
+if [[ -d "$PLUGIN_SCRIPTS_DIR" ]]; then
+    chmod +x "$PLUGIN_SCRIPTS_DIR"/*.sh 2>/dev/null || true
+    chmod +x "$PLUGIN_SCRIPTS_DIR"/*.php 2>/dev/null || true
+    echo " Set permissions for plugin script files"
+else
+    echo " Warning: Scripts directory not found at $PLUGIN_SCRIPTS_DIR"
+fi
+
+echo ""
+echo "----------------------------------------------------"
+echo " ssh-tools version &plugin_version; has been installed."
+echo " Scripts are available at: $PERSISTENT_DIR"
+echo "----------------------------------------------------"
+echo ""
+]]></INLINE>
+</FILE>
+
+<!-- UNINSTALL: Complete cleanup -->
+<FILE Run="/bin/bash" Method="remove">
+<INLINE><![CDATA[
+echo ""
+echo "----------------------------------------------------"
+echo " Performing complete ssh-tools cleanup..."
+echo "----------------------------------------------------"
+
+# Remove plugin packages from the system
+echo " Removing plugin packages..."
+for pkg in $(ls /var/log/packages/ | grep "^ssh-tools-" 2>/dev/null); do
+    removepkg "$pkg" 2>/dev/null || true
+done
+
+# Clean up plugin directory 
+PLUGIN_DIR="/usr/local/emhttp/plugins/ssh-tools"
+if [[ -d "$PLUGIN_DIR" ]]; then
+    echo " Removing plugin files from $PLUGIN_DIR"
+    rm -rf "$PLUGIN_DIR" 2>/dev/null || true
+fi
+
+# Clean up persistent config directory
+CONFIG_DIR="/boot/config/plugins/ssh-tools"
+if [[ -d "$CONFIG_DIR" ]]; then
+    echo " Removing persistent files from $CONFIG_DIR"
+    rm -rf "$CONFIG_DIR" 2>/dev/null || true
+fi
+
+echo ""
+echo "----------------------------------------------------"
+echo " Complete cleanup finished - system restored to pre-install state"
+echo " ssh-tools has been successfully removed."
+echo "----------------------------------------------------"
+echo ""
+]]></INLINE>
+</FILE>
+
+</PLUGIN>
