@@ -1,10 +1,23 @@
-<?PHP
+Menu="Settings"
+Title="SSH Tools"
+Icon="key"
+---
+<?
+# Get CSRF token from Unraid's variable system
+$csrf_token = $var['csrf_token'] ?? '';
+
+# Get plugin version
 $plugin = "ssh-tools";
-require_once "$docroot/webGui/include/Wrappers.php";
+$version_file = '/boot/config/plugins/ssh-tools/VERSION';
+$version = file_exists($version_file) ? trim(file_get_contents($version_file)) : 'Unknown';
 ?>
 
+<div style="color: #F15A2C; font-weight: bold; font-size: 12px; margin-bottom: 10px;">
+Plugin Version: <?=$version?>
+</div>
+
 <div style="margin-bottom: 20px;">
-<strong>SSH Tools v<?=exec("cat /boot/config/plugins/$plugin/VERSION 2>/dev/null || echo 'Unknown'")?></strong>
+<strong>SSH Tools</strong>
 </div>
 
 <div style="margin-bottom: 20px; color: var(--text-color);">
