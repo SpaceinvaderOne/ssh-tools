@@ -120,99 +120,7 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   pointer-events: none;
 }
 
-/* Modal system - theme neutral design following Unraid guidelines */
-.success-modal {
-  display: none;
-  position: fixed;
-  z-index: 9999;
-  left: 0;
-  top: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0, 0, 0, 0.75);
-  animation: fadeIn 0.3s ease;
-}
-
-.success-modal-content {
-  margin: 15% auto;
-  padding: 30px;
-  border: 2px solid #F15A2C;
-  border-radius: 8px;
-  width: 90%;
-  max-width: 500px;
-  text-align: center;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  animation: slideIn 0.3s ease;
-  position: relative;
-  /* Theme-neutral approach: NO background-color specified - inherits from Unraid theme */
-  /* This allows proper adaptation to both light and dark modes */
-}
-
-.success-modal h3 {
-  color: #F15A2C;
-  margin-top: 0;
-  margin-bottom: 15px;
-  font-size: 18px;
-}
-
-.success-modal p {
-  margin-bottom: 15px;
-  font-size: 14px;
-  line-height: 1.4;
-  /* Theme-neutral: Text color inherits from Unraid theme */
-}
-
-.success-modal .modal-buttons {
-  display: flex;
-  gap: 15px;
-  justify-content: center;
-  margin-top: 25px;
-}
-
-.success-modal button {
-  padding: 10px 25px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: bold;
-  transition: all 0.2s ease;
-  border: none;
-  min-width: 80px;
-}
-
-.success-modal button.primary {
-  background: #F15A2C;
-  color: white;
-}
-
-.success-modal button.primary:hover {
-  background: #d4491f;
-}
-
-.success-modal button.secondary {
-  border: 1px solid #ccc;
-  /* Theme-neutral: No background-color or color specified - inherits from Unraid theme */
-}
-
-.success-modal button.secondary:hover {
-  opacity: 0.8;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes slideIn {
-  from { 
-    opacity: 0;
-    transform: translateY(-30px);
-  }
-  to { 
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+/* SweetAlert is used for modals - provides automatic theme compatibility */
 </style>
 
 <!-- Tab Navigation -->
@@ -352,18 +260,7 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   <pre id="statusOutput">No operations performed yet. Output from plugin operations will appear here.</pre>
 </div>
 
-<!-- Pre-confirmation Modal -->
-<div id="confirmModal" class="success-modal">
-  <div class="success-modal-content">
-    <h3 id="confirmTitle">SSH Key Exchange</h3>
-    <p id="confirmMessage">This will exchange SSH keys with the target host. Continue?</p>
-    <p style="font-size: 12px; opacity: 0.7; margin-top: 10px;">If keys already exist, they will be added to your tracking list.</p>
-    <div class="modal-buttons">
-      <button class="secondary" onclick="closeConfirmModal()">Cancel</button>
-      <button class="primary" onclick="proceedWithAction()">Continue</button>
-    </div>
-  </div>
-</div>
+<!-- SweetAlert modals are used - no custom HTML needed -->
 
 
 <script>
@@ -436,12 +333,8 @@ function clearStatus() {
 // Global variables for modal state
 let modalActionData = {};
 
-// Pre-confirmation modal functions
+// SweetAlert confirmation modal
 function showConfirmModal(hostname) {
-  const modal = document.getElementById('confirmModal');
-  const title = document.getElementById('confirmTitle');
-  const message = document.getElementById('confirmMessage');
-  
   // Store data for later use
   modalActionData = {
     hostname: hostname,
@@ -450,25 +343,24 @@ function showConfirmModal(hostname) {
     password: document.getElementById('remotePassword').value
   };
   
-  title.textContent = 'SSH Key Exchange';
-  message.textContent = `This will exchange SSH keys with ${hostname}. If keys already exist, they will be added to your tracking list. Continue?`;
-  document.querySelector('#confirmModal .primary').textContent = 'Continue';
-  
-  modal.style.display = 'block';
-  document.body.style.overflow = 'hidden';
-}
-
-function closeConfirmModal() {
-  const modal = document.getElementById('confirmModal');
-  modal.style.display = 'none';
-  document.body.style.overflow = 'auto';
-  modalActionData = {};
-}
-
-function proceedWithAction() {
-  closeConfirmModal();
-  // Perform the exchange operation (handles both new exchange and rediscovery)
-  performSSHKeyExchange();
+  swal({
+    title: 'SSH Key Exchange',
+    text: `This will exchange SSH keys with ${hostname}. If keys already exist, they will be added to your tracking list. Continue?`,
+    type: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Continue',
+    cancelButtonText: 'Cancel',
+    closeOnConfirm: true,
+    html: true
+  }, function(isConfirm) {
+    if (isConfirm) {
+      // Perform the exchange operation
+      performSSHKeyExchange();
+    } else {
+      // User cancelled - clear stored data
+      modalActionData = {};
+    }
+  });
 }
 
 // Button loading state management
@@ -569,16 +461,36 @@ function performSSHKeyExchange() {
     setButtonLoading('exchangeBtn', false);
     smartUpdateStatus(response);
     
-    // Auto-navigate to Exchanged Keys tab after successful operation
+    // Show success modal and auto-navigate
     if (response.toLowerCase().includes('successfully')) {
-      setTimeout(function() {
+      swal({
+        title: 'Success!',
+        text: `SSH keys have been successfully exchanged with ${modalActionData.hostname}`,
+        type: 'success',
+        confirmButtonText: 'View Exchanged Keys',
+        closeOnConfirm: true
+      }, function() {
+        // Auto-navigate to Exchanged Keys tab
         checkKeyStatus();
         refreshExchangedKeys();
         showTab('keys');
-      }, 500);
+      });
+    } else if (response.toLowerCase().includes('error')) {
+      swal({
+        title: 'Error',
+        text: response,
+        type: 'error',
+        confirmButtonText: 'OK'
+      });
     }
   }, function() {
     setButtonLoading('exchangeBtn', false);
+    swal({
+      title: 'Error',
+      text: 'Failed to communicate with the server',
+      type: 'error',
+      confirmButtonText: 'OK'
+    });
   });
 }
 
