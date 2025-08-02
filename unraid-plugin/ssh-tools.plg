@@ -2,10 +2,10 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name                 "ssh-tools">
 <!ENTITY author               "SpaceInvaderOne">
-<!ENTITY plugin_version       "2025.08.02.1527">
+<!ENTITY plugin_version       "2025.08.02.1617">
 <!ENTITY launch_page          "Settings/&name;">
-<!ENTITY plugin_url           "https://github.com/SpaceinvaderOne/ssh-tools/raw/main/packages/pluginmain/ssh-tools-2025.08.02.1527-x86_64.txz">
-<!ENTITY plugin_md5           "318e2149424fa34a2bf015e1d200819e">
+<!ENTITY plugin_url           "https://github.com/SpaceinvaderOne/ssh-tools/raw/main/packages/pluginmain/ssh-tools-2025.08.02.1617-x86_64.txz">
+<!ENTITY plugin_md5           "1b37fa704cdb1a5772a6774b32a12f98">
 ]>
 
 <PLUGIN name="&name;" author="&author;" version="&plugin_version;" min="6.9.0" launch="&launch_page;" icon="gear">
@@ -34,6 +34,93 @@
 <INLINE>
 removepkg &name;-&plugin_version;-x86_64
 </INLINE>
+</FILE>
+
+<!-- === DEPENDENCY MANAGEMENT FRAMEWORK === -->
+<!-- 
+    Smart Dependency Installation with Tracking v1.0
+    
+    This framework provides:
+    - Conditional installation (only if dependency missing)
+    - Installation tracking (records what we install)
+    - Safe uninstall (only removes what we installed)
+    - Reusable across plugins (just change PLUGIN_NAME and dependencies)
+    
+    To reuse in other plugins:
+    1. Change PLUGIN_NAME variable
+    2. Update DEPENDENCIES_BASE_URL 
+    3. Modify install_dependency calls for your dependencies
+    4. Copy the corresponding uninstall section
+-->
+<FILE Run="/bin/bash">
+<INLINE><![CDATA[
+echo ""
+echo "----------------------------------------------------"
+echo " Dependency Management Framework v1.0"
+echo " Checking and installing required dependencies..."
+echo "----------------------------------------------------"
+
+# Configuration
+PLUGIN_NAME="ssh-tools"
+DEPENDENCIES_DIR="/boot/config/plugins/$PLUGIN_NAME"
+INSTALLED_DEPS_FILE="$DEPENDENCIES_DIR/installed_dependencies.txt"
+DEPENDENCIES_BASE_URL="https://github.com/SpaceinvaderOne/ssh-tools/raw/main/packages/dependencies"
+
+# Ensure tracking directory exists
+mkdir -p "$DEPENDENCIES_DIR"
+
+# Clear previous tracking (fresh install)
+> "$INSTALLED_DEPS_FILE"
+
+# Reusable dependency installation function
+install_dependency() {
+    local package_name="$1"
+    local package_file="$2" 
+    local command_check="$3"
+    
+    echo ""
+    echo "Checking dependency: $package_name"
+    
+    if ! command -v "$command_check" >/dev/null 2>&1; then
+        echo " $package_name not found - installing..."
+        
+        # Download dependency
+        if wget -q -O "/tmp/$package_file" "$DEPENDENCIES_BASE_URL/$package_file"; then
+            echo " Downloaded $package_file successfully"
+        else
+            echo " Error: Failed to download $package_file"
+            return 1
+        fi
+        
+        # Install dependency
+        if installpkg "/tmp/$package_file" >/dev/null 2>&1; then
+            echo " $package_name installed successfully"
+            # TRACK WHAT WE INSTALLED
+            echo "$package_name" >> "$INSTALLED_DEPS_FILE"
+            echo " Recorded $package_name as plugin-installed dependency"
+        else
+            echo " Error: Failed to install $package_name"
+        fi
+        
+        # Clean up temporary file
+        rm -f "/tmp/$package_file"
+    else
+        echo " $package_name already available (not installed by this plugin)"
+    fi
+}
+
+# Install required dependencies for ssh-tools plugin
+install_dependency "sshpass" "sshpass-1.05-x86_64-1_SBo.tgz" "sshpass"
+
+# Future dependencies can be added here:
+# install_dependency "expect" "expect-5.45-x86_64-1.tgz" "expect"
+
+echo ""
+echo "----------------------------------------------------"
+echo " Dependency check completed"
+echo "----------------------------------------------------"
+echo ""
+]]></INLINE>
 </FILE>
 
 <!-- Step 2: Download and install the new package. -->
@@ -99,6 +186,34 @@ echo " Removing plugin packages..."
 for pkg in $(ls /var/log/packages/ | grep "^ssh-tools-" 2>/dev/null); do
     removepkg "$pkg" 2>/dev/null || true
 done
+
+# === SMART DEPENDENCY CLEANUP === 
+# Part of Dependency Management Framework v1.0
+# Only removes dependencies that were tracked as installed by this plugin
+# This prevents removing pre-existing system packages or packages installed by other plugins
+echo ""
+echo "Checking for plugin-installed dependencies to remove..."
+
+PLUGIN_NAME="ssh-tools"
+DEPENDENCIES_DIR="/boot/config/plugins/$PLUGIN_NAME"
+INSTALLED_DEPS_FILE="$DEPENDENCIES_DIR/installed_dependencies.txt"
+
+if [[ -f "$INSTALLED_DEPS_FILE" ]]; then
+    if [[ -s "$INSTALLED_DEPS_FILE" ]]; then
+        echo "Found dependency tracking file - removing plugin-installed dependencies:"
+        while IFS= read -r dependency; do
+            if [[ -n "$dependency" ]]; then
+                echo " Removing plugin-installed dependency: $dependency"
+                removepkg "$dependency" 2>/dev/null || true
+            fi
+        done < "$INSTALLED_DEPS_FILE"
+        echo "Plugin-installed dependencies removed successfully"
+    else
+        echo "Dependency tracking file is empty - no dependencies were installed by this plugin"
+    fi
+else
+    echo "No dependency tracking file found - no dependencies to remove"
+fi
 
 # Clean up plugin directory 
 PLUGIN_DIR="/usr/local/emhttp/plugins/ssh-tools"
