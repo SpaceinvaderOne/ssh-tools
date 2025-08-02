@@ -49,7 +49,7 @@ validate_environment() {
         error_exit "No operation specified"
     fi
     
-    debug_log "Operation: $OPERATION"
+    # debug_log "Operation: $OPERATION" # Removed - corrupts HTML output
     ensure_data_dir
 }
 
