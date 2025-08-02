@@ -120,7 +120,7 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   pointer-events: none;
 }
 
-/* Modal system - theme compatible */
+/* Modal system - theme neutral design following Unraid guidelines */
 .success-modal {
   display: none;
   position: fixed;
@@ -144,8 +144,8 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   animation: slideIn 0.3s ease;
   position: relative;
-  background-color: var(--gray-50, #f9fafb);
-  /* Using Unraid's theme-aware gray variable for modal background */
+  /* Theme-neutral approach: NO background-color specified - inherits from Unraid theme */
+  /* This allows proper adaptation to both light and dark modes */
 }
 
 .success-modal h3 {
@@ -159,7 +159,7 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   margin-bottom: 15px;
   font-size: 14px;
   line-height: 1.4;
-  /* Text color inherits from Unraid theme */
+  /* Theme-neutral: Text color inherits from Unraid theme */
 }
 
 .success-modal .modal-buttons {
@@ -191,7 +191,7 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
 
 .success-modal button.secondary {
   border: 1px solid #ccc;
-  /* Background and text color inherit from Unraid theme */
+  /* Theme-neutral: No background-color or color specified - inherits from Unraid theme */
 }
 
 .success-modal button.secondary:hover {
