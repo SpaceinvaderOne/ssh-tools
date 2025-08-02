@@ -306,6 +306,164 @@ scan_for_ssh() {
     fi
 }
 
+# Backup authorized_keys file before modifications
+backup_authorized_keys() {
+    local auth_keys_file="/root/.ssh/authorized_keys"
+    local backup_file="/root/.ssh/authorized_keys.backup.$(date +%Y%m%d_%H%M%S)"
+    
+    if [[ -f "$auth_keys_file" ]]; then
+        cp "$auth_keys_file" "$backup_file" 2>/dev/null || true
+        debug_log "Backed up authorized_keys to $backup_file"
+        return 0
+    else
+        debug_log "No authorized_keys file to backup"
+        return 1
+    fi
+}
+
+# List authorized SSH keys that can connect to this server
+list_authorized_keys() {
+    local auth_keys_file="/root/.ssh/authorized_keys"
+    
+    if [[ ! -f "$auth_keys_file" ]]; then
+        echo "<h4>Authorized SSH Keys:</h4>"
+        echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
+        echo "No authorized keys found.<br>No external machines are currently authorized to connect to this server."
+        echo "</div>"
+        return 0
+    fi
+    
+    echo "<h4>Authorized SSH Keys:</h4>"
+    echo "<div style='margin-bottom: 15px;'>"
+    
+    local entry_count=0
+    local line_number=0
+    
+    while IFS= read -r line; do
+        ((line_number++))
+        
+        # Skip empty lines and comments
+        if [[ -z "$line" ]] || [[ "$line" =~ ^[[:space:]]*# ]]; then
+            continue
+        fi
+        
+        ((entry_count++))
+        
+        # Parse SSH key format: keytype key comment
+        local key_type=$(echo "$line" | awk '{print $1}')
+        local key_data=$(echo "$line" | awk '{print $2}')
+        local key_comment=$(echo "$line" | awk '{for(i=3; i<=NF; i++) printf "%s ", $i}' | sed 's/[[:space:]]*$//')
+        
+        # Extract user and hostname from comment (user@hostname format)
+        local user_info=""
+        local hostname=""
+        
+        if [[ "$key_comment" =~ (.+)@(.+) ]]; then
+            user_info="${BASH_REMATCH[1]}"
+            hostname="${BASH_REMATCH[2]}"
+        elif [[ -n "$key_comment" ]]; then
+            # If no @ symbol, use entire comment as hostname
+            hostname="$key_comment"
+            user_info="unknown"
+        else
+            hostname="Unknown Host"
+            user_info="unknown"
+        fi
+        
+        # Test connectivity to determine active/inactive status
+        local status_color="#28a745"
+        local status_text="✓ Active"
+        
+        if [[ "$hostname" != "Unknown Host" ]] && [[ "$hostname" != *"localhost"* ]]; then
+            # Try to ping the hostname (quick test)
+            if ! ping -c 1 -W 2 "$hostname" >/dev/null 2>&1; then
+                status_color="#dc3545"
+                status_text="✗ Inactive"
+            fi
+        else
+            status_color="#ffc107"
+            status_text="? Unknown"
+        fi
+        
+        # Generate unique ID for this key (using line number)
+        local key_id="auth_key_${line_number}"
+        
+        echo "<div style='margin-bottom: 10px; padding: 12px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;'>"
+        echo "  <div style='display: flex; justify-content: space-between; align-items: center;'>"
+        echo "    <div>"
+        echo "      <strong style='color: #333;'>$hostname</strong>"
+        if [[ "$user_info" != "unknown" ]]; then
+            echo "      <span style='color: #666; margin-left: 10px;'>User: $user_info</span>"
+        fi
+        echo "      <div style='font-size: 11px; color: #888; margin-top: 2px;'>Key Type: $key_type</div>"
+        echo "    </div>"
+        echo "    <div style='display: flex; align-items: center; gap: 15px;'>"
+        echo "      <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
+        echo "      <button onclick='deleteAuthorizedKey(\"$key_id\", \"$hostname\", $line_number)' style='background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;' title='Remove authorized key'>🗑️ Remove</button>"
+        echo "    </div>"
+        echo "  </div>"
+        echo "</div>"
+        
+    done < "$auth_keys_file"
+    
+    if [[ $entry_count -eq 0 ]]; then
+        echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
+        echo "No valid authorized keys found.<br>The authorized_keys file exists but contains no valid entries."
+        echo "</div>"
+    fi
+    
+    echo "</div>"
+}
+
+# Remove a specific authorized key by line number
+remove_authorized_key() {
+    local line_number="$1"
+    
+    if [[ -z "$line_number" ]] || ! [[ "$line_number" =~ ^[0-9]+$ ]]; then
+        error_exit "Invalid line number for key removal"
+    fi
+    
+    local auth_keys_file="/root/.ssh/authorized_keys"
+    
+    if [[ ! -f "$auth_keys_file" ]]; then
+        error_exit "No authorized_keys file found"
+    fi
+    
+    # Create backup before modification
+    backup_authorized_keys
+    
+    # Count total lines in file
+    local total_lines=$(wc -l < "$auth_keys_file")
+    
+    if [[ $line_number -gt $total_lines ]]; then
+        error_exit "Line number $line_number exceeds file length ($total_lines lines)"
+    fi
+    
+    # Create temporary file without the specified line
+    local temp_file=$(mktemp)
+    
+    # Copy all lines except the one to be removed
+    sed "${line_number}d" "$auth_keys_file" > "$temp_file"
+    
+    # Verify the operation succeeded
+    if [[ $? -eq 0 ]] && [[ -f "$temp_file" ]]; then
+        # Replace original file
+        mv "$temp_file" "$auth_keys_file"
+        
+        # Set proper permissions
+        chmod 600 "$auth_keys_file" 2>/dev/null || true
+        
+        log_info "Successfully removed authorized key at line $line_number"
+        log_info "Backup created before modification"
+        
+        return 0
+    else
+        # Cleanup temp file if something went wrong
+        rm -f "$temp_file" 2>/dev/null || true
+        error_exit "Failed to remove authorized key - file not modified"
+    fi
+}
+
 # Main logic dispatcher
 process_operation() {
     local operation="$1"
@@ -343,6 +501,15 @@ process_operation() {
                 error_exit "Missing network parameter for SSH scan"
             fi
             scan_for_ssh "$SCAN_NETWORK"
+            ;;
+        "list_authorized_keys")
+            list_authorized_keys
+            ;;
+        "remove_authorized_key")
+            if [[ -z "$KEY_LINE_NUMBER" ]]; then
+                error_exit "Missing line number parameter for key removal"
+            fi
+            remove_authorized_key "$KEY_LINE_NUMBER"
             ;;
         *)
             error_exit "Unknown operation: $operation"

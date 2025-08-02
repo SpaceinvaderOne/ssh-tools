@@ -219,6 +219,23 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   </div>
   
   <div style="margin-top: 20px;">
+    <h3>Authorized SSH Keys</h3>
+    <p>Machines that are authorized to connect to this server</p>
+    <dl>
+      <dt>&nbsp;</dt>
+      <dd>
+        <span class="buttons-spaced">
+          <button type="button" onclick="refreshAuthorizedKeys()">Refresh List</button>
+        </span>
+        <div class="description">Manage machines authorized to connect to your server</div>
+      </dd>
+    </dl>
+    <div id="authorizedKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
+      Loading authorized keys...
+    </div>
+  </div>
+  
+  <div style="margin-top: 20px;">
     <h3>SSH Tools</h3>
     <dl>
       <dt>Connection Testing</dt>
@@ -300,6 +317,7 @@ function showTab(tabId) {
   // Refresh data when switching to certain tabs
   if (tabId === 'keys') {
     refreshExchangedKeys();
+    refreshAuthorizedKeys();
   } else if (tabId === 'exchange') {
     checkKeyStatus();
   }
@@ -536,6 +554,70 @@ function scanForSSH() {
   executeOperation('scan_ssh', { network: network });
 }
 
+// Authorized Keys Management Functions
+function refreshAuthorizedKeys() {
+  document.getElementById('authorizedKeysList').innerHTML = '<div class="loading-spinner"></div>Loading authorized keys...';
+  
+  executeOperation('list_authorized_keys', {}, function(response) {
+    document.getElementById('authorizedKeysList').innerHTML = response;
+    smartUpdateStatus('Authorized keys list updated');
+  }, function() {
+    document.getElementById('authorizedKeysList').innerHTML = '<div style="color: #dc3545;">Error loading authorized keys</div>';
+  });
+}
+
+function deleteAuthorizedKey(keyId, hostname, lineNumber) {
+  swal({
+    title: 'Remove Authorized Key?',
+    text: `This will revoke SSH access for <strong>${hostname}</strong>.<br><br>The machine will no longer be able to connect to this server without a password.<br><br>This action cannot be undone.`,
+    type: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Remove Access',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: '#d33',
+    html: true
+  }, function(isConfirm) {
+    if (isConfirm) {
+      performAuthorizedKeyDeletion(keyId, hostname, lineNumber);
+    }
+  });
+}
+
+function performAuthorizedKeyDeletion(keyId, hostname, lineNumber) {
+  updateStatus(`Removing authorized key for ${hostname}...`);
+  
+  executeOperation('remove_authorized_key', { 
+    key_line_number: lineNumber 
+  }, function(response) {
+    if (response.toLowerCase().includes('successfully')) {
+      swal({
+        title: 'Access Revoked!',
+        text: `SSH access has been successfully removed for ${hostname}`,
+        type: 'success',
+        confirmButtonText: 'Continue'
+      }, function() {
+        // Refresh the authorized keys list
+        refreshAuthorizedKeys();
+        smartUpdateStatus(response);
+      });
+    } else {
+      swal({
+        title: 'Error',
+        text: response,
+        type: 'error',
+        confirmButtonText: 'OK'
+      });
+    }
+  }, function() {
+    swal({
+      title: 'Error',
+      text: 'Failed to communicate with the server',
+      type: 'error',
+      confirmButtonText: 'OK'
+    });
+  });
+}
+
 // Helper function for AJAX operations
 function executeOperation(operation, data, successCallback, errorCallback) {
   const postData = {
@@ -599,6 +681,7 @@ $(document).ready(function() {
     // Load initial data silently
     checkKeyStatus();
     refreshExchangedKeys();
+    refreshAuthorizedKeys();
     updateStatus('Ready for SSH key operations');
   } else {
     updateStatus('Warning: CSRF token missing - some functions may not work');

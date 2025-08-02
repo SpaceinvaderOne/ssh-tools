@@ -157,7 +157,22 @@ switch ($operation) {
         
     case 'list_exchanged_keys':
     case 'test_all_connections':
+    case 'list_authorized_keys':
         // No additional parameters needed
+        break;
+        
+    case 'remove_authorized_key':
+        if (isset($_POST['key_line_number'])) {
+            $lineNumber = intval($_POST['key_line_number']);
+            if ($lineNumber <= 0) {
+                echo "Error: Invalid line number";
+                exit;
+            }
+            $env['KEY_LINE_NUMBER'] = $lineNumber;
+        } else {
+            echo "Error: Line number is required for key removal";
+            exit;
+        }
         break;
 }
 
