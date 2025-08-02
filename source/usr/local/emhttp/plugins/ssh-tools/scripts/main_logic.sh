@@ -32,6 +32,15 @@ ensure_data_dir() {
         mkdir -p "$PLUGIN_DATA_DIR"
         debug_log "Created plugin data directory: $PLUGIN_DATA_DIR"
     fi
+    
+    # Ensure exchanged keys file exists
+    if [[ ! -f "$EXCHANGED_KEYS_FILE" ]]; then
+        touch "$EXCHANGED_KEYS_FILE"
+        debug_log "Created exchanged keys tracking file: $EXCHANGED_KEYS_FILE"
+    fi
+    
+    # Set proper permissions
+    chmod 644 "$EXCHANGED_KEYS_FILE" 2>/dev/null || true
 }
 
 # Validate environment
@@ -120,14 +129,31 @@ exchange_ssh_keys() {
     
     # Update known_hosts to fix Unraid-specific issue
     log_info "Updating known_hosts file..."
+    
+    # Fix permissions on known_hosts file first
+    if [[ -f ~/.ssh/known_hosts ]]; then
+        chmod 644 ~/.ssh/known_hosts 2>/dev/null || true
+        # Remove any existing entries for this host to prevent duplicates
+        ssh-keygen -R "$host" 2>/dev/null || true
+    fi
+    
+    # Add the host key using ssh-keyscan (your proven method)
     ssh-keyscan -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
     
+    # Set proper permissions
+    chmod 600 ~/.ssh/known_hosts 2>/dev/null || true
+    
     # Verify the key exchange worked
+    log_info "Verifying passwordless SSH connection..."
     if ssh -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
         log_info "SSH key exchange completed successfully!"
         
         # Record the successful exchange
+        log_info "Recording successful exchange in tracking file..."
         echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}" >> "$EXCHANGED_KEYS_FILE"
+        
+        # Debug: Confirm what was written
+        debug_log "Exchange recorded: $(tail -1 "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo 'Failed to read tracking file')"
         
         return 0
     else
