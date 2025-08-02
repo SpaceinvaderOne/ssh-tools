@@ -113,7 +113,8 @@ exchange_ssh_keys() {
         
         # Record the existing exchange (rediscovery feature)
         echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}" >> "$EXCHANGED_KEYS_FILE"
-        debug_log "Exchange recorded: $(tail -1 "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo 'Failed to read tracking file')"
+        log_info "Exchange recorded to: $EXCHANGED_KEYS_FILE"
+        log_info "File now contains: $(wc -l < "$EXCHANGED_KEYS_FILE") lines"
         
         log_info "Existing SSH key exchange added to tracking list successfully!"
         return 0
@@ -158,9 +159,8 @@ exchange_ssh_keys() {
         # Record the successful exchange
         log_info "Recording successful exchange in tracking file..."
         echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}" >> "$EXCHANGED_KEYS_FILE"
-        
-        # Debug: Confirm what was written
-        debug_log "Exchange recorded: $(tail -1 "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo 'Failed to read tracking file')"
+        log_info "Exchange recorded to: $EXCHANGED_KEYS_FILE"
+        log_info "File now contains: $(wc -l < "$EXCHANGED_KEYS_FILE") lines"
         
         return 0
     else
@@ -186,10 +186,7 @@ list_exchanged_keys() {
     if [[ -f "$EXCHANGED_KEYS_FILE" ]]; then
         echo "<h4>Successfully Exchanged Keys:</h4>"
         
-        # Debug: Show file contents (visible in web interface)
-        log_info "DEBUG: Exchanged keys file contents:"
-        log_info "$(cat "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo 'Failed to read file')"
-        log_info "DEBUG: Line count: $(wc -l < "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo '0')"
+        # Debug removed - was corrupting HTML output
         
         if [[ -s "$EXCHANGED_KEYS_FILE" ]]; then
             echo "<div style='margin-bottom: 15px;'>"
@@ -204,9 +201,7 @@ list_exchanged_keys() {
                     username=$(echo "$connection" | cut -d'@' -f1)
                     hostname=$(echo "$connection" | cut -d'@' -f2)
                     
-                    # Debug logging (visible in web interface)
-                    log_info "DEBUG: Processing line: $line"
-                    log_info "DEBUG: Parsed - timestamp: $timestamp, connection: $connection, username: $username, hostname: $hostname"
+                    # Debug removed - was corrupting HTML output
                     
                     # Test if connection is still active
                     status_color="#28a745"
@@ -229,7 +224,7 @@ list_exchanged_keys() {
                 fi
             done < "$EXCHANGED_KEYS_FILE"
             
-            log_info "DEBUG: Processed $entry_count entries total"
+            # Debug removed - was corrupting HTML output
             echo "</div>"
         else
             echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
