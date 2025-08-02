@@ -66,13 +66,12 @@ check_or_generate_ssh_key() {
     fi
 }
 
-# Get SSH key status information
+# Get SSH key status information (user-friendly)
 get_key_status() {
     if [[ -f "$SSH_KEY_PATH" ]] && [[ -f "$SSH_PUB_KEY_PATH" ]]; then
-        local fingerprint=$(ssh-keygen -lf "$SSH_PUB_KEY_PATH" 2>/dev/null | awk '{print $2}')
-        echo "SSH key exists - Fingerprint: $fingerprint"
+        echo "✓ SSH key ready for exchanges"
     else
-        echo "No SSH key found - will be generated when needed"
+        echo "⚠ No SSH key found - will generate automatically"
     fi
 }
 

@@ -119,6 +119,77 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   opacity: 0.6;
   pointer-events: none;
 }
+
+/* Success popup modal */
+.success-modal {
+  display: none;
+  position: fixed;
+  z-index: 9999;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  animation: fadeIn 0.3s ease;
+}
+
+.success-modal-content {
+  background-color: var(--form-bg);
+  margin: 15% auto;
+  padding: 30px;
+  border: 2px solid #F15A2C;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 500px;
+  text-align: center;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  animation: slideIn 0.3s ease;
+}
+
+.success-modal h3 {
+  color: #F15A2C;
+  margin-top: 0;
+  margin-bottom: 15px;
+  font-size: 18px;
+}
+
+.success-modal p {
+  margin-bottom: 25px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.success-modal button {
+  background: #F15A2C;
+  color: white;
+  border: none;
+  padding: 10px 25px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  transition: background 0.2s ease;
+}
+
+.success-modal button:hover {
+  background: #d4491f;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideIn {
+  from { 
+    opacity: 0;
+    transform: translateY(-30px);
+  }
+  to { 
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 </style>
 
 <!-- Tab Navigation -->
@@ -258,6 +329,15 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   <pre id="statusOutput">No operations performed yet. Output from plugin operations will appear here.</pre>
 </div>
 
+<!-- Success Modal -->
+<div id="successModal" class="success-modal">
+  <div class="success-modal-content">
+    <h3>✓ Success!</h3>
+    <p id="successMessage">SSH keys successfully exchanged!</p>
+    <button onclick="closeSuccessModal()">OK</button>
+  </div>
+</div>
+
 <script>
 // Make CSRF token available to JavaScript
 var csrf_token = '<?=$csrf_token?>';
@@ -323,6 +403,26 @@ function setStatus(message, type = 'info') {
 
 function clearStatus() {
   document.getElementById('statusOutput').textContent = 'Output cleared.\n';
+}
+
+// Success modal functions
+function showSuccessModal(hostname) {
+  const modal = document.getElementById('successModal');
+  const message = document.getElementById('successMessage');
+  message.textContent = `SSH keys successfully exchanged with ${hostname}!`;
+  modal.style.display = 'block';
+  
+  // Prevent body scrolling while modal is open
+  document.body.style.overflow = 'hidden';
+}
+
+function closeSuccessModal() {
+  const modal = document.getElementById('successModal');
+  modal.style.display = 'none';
+  document.body.style.overflow = 'auto';
+  
+  // Auto-navigate to Exchanged Keys tab
+  showTab('keys');
 }
 
 // Button loading state management
@@ -422,11 +522,17 @@ function exchangeSSHKeys() {
     setButtonLoading('exchangeBtn', false);
     smartUpdateStatus(response);
     
-    // Refresh the key status and exchanged keys list after successful exchange
-    setTimeout(function() {
-      checkKeyStatus();
-      refreshExchangedKeys();
-    }, 1000);
+    // Check if the exchange was successful
+    if (response.toLowerCase().includes('successfully') || response.toLowerCase().includes('added to tracking list successfully')) {
+      // Show success modal and auto-navigate
+      showSuccessModal(host);
+      
+      // Refresh data in background for when user reaches Exchanged Keys tab
+      setTimeout(function() {
+        checkKeyStatus();
+        refreshExchangedKeys();
+      }, 500);
+    }
   }, function() {
     setButtonLoading('exchangeBtn', false);
   });
