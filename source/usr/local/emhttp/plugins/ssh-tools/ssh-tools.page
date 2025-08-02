@@ -334,7 +334,18 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   <div class="success-modal-content">
     <h3>✓ Success!</h3>
     <p id="successMessage">SSH keys successfully exchanged!</p>
+    <p style="font-size: 12px; color: #666; margin-top: 10px;">Passwordless SSH access is now configured.</p>
     <button onclick="closeSuccessModal()">OK</button>
+  </div>
+</div>
+
+<!-- Rediscovery Modal -->
+<div id="rediscoveryModal" class="success-modal">
+  <div class="success-modal-content">
+    <h3>✓ Keys Found!</h3>
+    <p id="rediscoveryMessage">SSH keys already exist!</p>
+    <p style="font-size: 12px; color: #666; margin-top: 10px;">Added existing connection to your tracking list.</p>
+    <button onclick="closeRediscoveryModal()">OK</button>
   </div>
 </div>
 
@@ -418,6 +429,26 @@ function showSuccessModal(hostname) {
 
 function closeSuccessModal() {
   const modal = document.getElementById('successModal');
+  modal.style.display = 'none';
+  document.body.style.overflow = 'auto';
+  
+  // Auto-navigate to Exchanged Keys tab
+  showTab('keys');
+}
+
+// Rediscovery modal functions
+function showRediscoveryModal(hostname) {
+  const modal = document.getElementById('rediscoveryModal');
+  const message = document.getElementById('rediscoveryMessage');
+  message.textContent = `SSH keys already exist with ${hostname}`;
+  modal.style.display = 'block';
+  
+  // Prevent body scrolling while modal is open
+  document.body.style.overflow = 'hidden';
+}
+
+function closeRediscoveryModal() {
+  const modal = document.getElementById('rediscoveryModal');
   modal.style.display = 'none';
   document.body.style.overflow = 'auto';
   
@@ -522,10 +553,17 @@ function exchangeSSHKeys() {
     setButtonLoading('exchangeBtn', false);
     smartUpdateStatus(response);
     
-    // Check if the exchange was successful
+    // Check if the operation was successful and determine the type
     if (response.toLowerCase().includes('successfully') || response.toLowerCase().includes('added to tracking list successfully')) {
-      // Show success modal and auto-navigate
-      showSuccessModal(host);
+      // Determine if this was a new exchange or rediscovery
+      if (response.toLowerCase().includes('existing ssh key exchange added to tracking list successfully') || 
+          response.toLowerCase().includes('ssh keys already exchanged')) {
+        // This was a rediscovery - keys already existed
+        showRediscoveryModal(host);
+      } else {
+        // This was a new exchange
+        showSuccessModal(host);
+      }
       
       // Refresh data in background for when user reaches Exchanged Keys tab
       setTimeout(function() {
