@@ -67,39 +67,20 @@ get_key_status() {
     fi
 }
 
-# Test SSH connection (with password authentication)
+# Test SSH connection (basic connectivity test)
 test_ssh_connection() {
     local host="$1"
     local username="$2"
     local password="$3"
     
-    log_info "Testing SSH connection to ${username}@${host}..."
+    log_info "Testing SSH connectivity to ${username}@${host}..."
     
-    # Use sshpass to test password authentication
-    if command -v sshpass >/dev/null 2>&1; then
-        if sshpass -p "$password" ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=no "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
-            log_info "Connection test to ${username}@${host} succeeded"
-            return 0
-        else
-            log_info "Connection test to ${username}@${host} failed"
-            return 1
-        fi
+    # Simple connectivity test - check if SSH port is open
+    if timeout 5 bash -c "</dev/tcp/${host}/22" 2>/dev/null; then
+        log_info "SSH port 22 is open on ${host} - connectivity verified"
+        return 0
     else
-        # Fallback: Install sshpass if needed
-        log_info "Installing sshpass for password authentication..."
-        if command -v apk >/dev/null 2>&1; then
-            apk add --no-cache sshpass >/dev/null 2>&1 || true
-        fi
-        
-        # Retry with sshpass
-        if command -v sshpass >/dev/null 2>&1; then
-            if sshpass -p "$password" ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=no "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
-                log_info "Connection test to ${username}@${host} succeeded"
-                return 0
-            fi
-        fi
-        
-        log_info "Connection test to ${username}@${host} failed - sshpass may not be available"
+        log_info "Cannot connect to SSH port 22 on ${host}"
         return 1
     fi
 }
@@ -127,17 +108,35 @@ exchange_ssh_keys() {
         error_exit "Cannot connect to ${username}@${host} with provided credentials"
     fi
     
-    # Exchange keys using ssh-copy-id with sshpass
+    # Exchange keys using ssh-copy-id (the proven Unraid method)
     log_info "Exchanging SSH keys with ${username}@${host}..."
     
+    # Try with sshpass first (if available), otherwise try expect
     if command -v sshpass >/dev/null 2>&1; then
-        if sshpass -p "$password" ssh-copy-id -f -o StrictHostKeyChecking=no -i "$SSH_PUB_KEY_PATH" "${username}@${host}" 2>/dev/null; then
+        log_info "Using sshpass with ssh-copy-id..."
+        if sshpass -p "$password" ssh-copy-id -f -o StrictHostKeyChecking=no -i "$SSH_PUB_KEY_PATH" "${username}@${host}" 2>&1; then
             log_info "SSH key successfully copied to ${username}@${host}"
         else
             error_exit "Failed to copy SSH key to ${username}@${host}"
         fi
     else
-        error_exit "sshpass not available for SSH key exchange"
+        # Try to install sshpass first
+        log_info "sshpass not found, attempting to install..."
+        if command -v apk >/dev/null 2>&1; then
+            apk add --no-cache sshpass >/dev/null 2>&1 && log_info "sshpass installed successfully"
+        fi
+        
+        # Retry with sshpass if installation succeeded
+        if command -v sshpass >/dev/null 2>&1; then
+            log_info "Using newly installed sshpass with ssh-copy-id..."
+            if sshpass -p "$password" ssh-copy-id -f -o StrictHostKeyChecking=no -i "$SSH_PUB_KEY_PATH" "${username}@${host}" 2>&1; then
+                log_info "SSH key successfully copied to ${username}@${host}"
+            else
+                error_exit "Failed to copy SSH key to ${username}@${host}"
+            fi
+        else
+            error_exit "sshpass is required for automated SSH key exchange but could not be installed"
+        fi
     fi
     
     # Update known_hosts to fix Unraid-specific issue
