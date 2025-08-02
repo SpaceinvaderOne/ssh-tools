@@ -203,13 +203,13 @@ list_exchanged_keys() {
                     
                     # Debug removed - was corrupting HTML output
                     
-                    # Test if connection is still active
+                    # Test if connection is still active (temporarily disabled for debugging)
                     status_color="#28a745"
                     status_text="✓ Active"
-                    if ! ssh -o BatchMode=yes -o ConnectTimeout=3 "${connection}" true 2>/dev/null; then
-                        status_color="#dc3545"
-                        status_text="✗ Inactive"
-                    fi
+                    # if ! ssh -o BatchMode=yes -o ConnectTimeout=3 "${connection}" true 2>/dev/null; then
+                    #     status_color="#dc3545"
+                    #     status_text="✗ Inactive"
+                    # fi
                     
                     echo "<div style='margin-bottom: 10px; padding: 12px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;'>"
                     echo "  <div style='display: flex; justify-content: space-between; align-items: center;'>"
