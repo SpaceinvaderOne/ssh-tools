@@ -8,12 +8,17 @@ if (session_status() == PHP_SESSION_NONE) {
 }
 
 // CSRF Protection - Temporarily disabled for debugging
-// TODO: Implement proper CSRF protection for production use
+// TODO: Re-enable CSRF protection once token issues are resolved
 /*
 $expected_token = $var['csrf_token'] ?? $_SESSION['csrf_token'] ?? '';
 $provided_token = $_POST['csrf_token'] ?? '';
+
+// Debug CSRF token information
+error_log("SSH-Tools PHP: Expected CSRF token: " . ($expected_token ? 'present' : 'missing'));
+error_log("SSH-Tools PHP: Provided CSRF token: " . ($provided_token ? 'present' : 'missing'));
+
 if (empty($expected_token) || empty($provided_token) || $provided_token !== $expected_token) {
-    echo "Error: Invalid CSRF token";
+    echo "Error: Invalid CSRF token (Expected: " . ($expected_token ? 'present' : 'missing') . ", Provided: " . ($provided_token ? 'present' : 'missing') . ")";
     exit;
 }
 */

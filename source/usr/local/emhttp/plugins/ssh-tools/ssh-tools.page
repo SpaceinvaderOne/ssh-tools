@@ -6,6 +6,9 @@ Icon="key"
 # Get CSRF token from Unraid's variable system
 $csrf_token = $var['csrf_token'] ?? '';
 
+# Debug CSRF token
+error_log("SSH-Tools: CSRF token from \$var: " . ($csrf_token ? 'present' : 'missing'));
+
 # Get plugin version
 $plugin = "ssh-tools";
 $version_file = '/boot/config/plugins/ssh-tools/VERSION';
@@ -154,7 +157,7 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
     <dl>
       <dt>Password</dt>
       <dd>
-        <input type="password" id="remotePassword" class="short" placeholder="Password for authentication">
+        <input type="password" id="remotePassword" class="short" placeholder="Password for authentication" autocomplete="current-password">
         <div style="margin-top: 5px;">
           <input type="checkbox" id="showPassword" onchange="togglePasswordVisibility()">
           <label for="showPassword" style="margin-left: 5px;">Show password</label>
@@ -514,22 +517,29 @@ function executeOperation(operation, data, successCallback, errorCallback) {
 
 // Initialize the interface
 $(document).ready(function() {
-  // Load initial data silently
-  checkKeyStatus();
-  refreshExchangedKeys();
-  
-  // Welcome message - add to status but don't switch to it
-  updateStatus('SSH Tools plugin initialized successfully');
-  updateStatus('Initializing SSH key management interface...');
-  updateStatus('CSRF token initialized: ' + (csrf_token ? csrf_token.substring(0, 8) + '...' : 'MISSING'));
-  updateStatus('Ready for SSH key operations');
-  
-  // Start on the exchange tab after initialization
+  // Start on the exchange tab first, before any AJAX calls
   showTab('exchange');
   
   // Add click handlers for tab buttons to ensure they work
   $('#btn-exchange').click(function() { showTab('exchange'); });
   $('#btn-keys').click(function() { showTab('keys'); });
   $('#btn-status').click(function() { showTab('status'); });
+  
+  // Welcome message - add to status but don't switch to it
+  updateStatus('SSH Tools plugin initialized successfully');
+  updateStatus('Initializing SSH key management interface...');
+  updateStatus('CSRF token initialized: ' + (csrf_token ? csrf_token.substring(0, 8) + '...' : 'MISSING'));
+  
+  // Only load initial data if CSRF token is available
+  if (csrf_token && csrf_token.length > 0) {
+    updateStatus('Loading initial data...');
+    // Load initial data silently
+    checkKeyStatus();
+    refreshExchangedKeys();
+    updateStatus('Ready for SSH key operations');
+  } else {
+    updateStatus('Warning: CSRF token missing - some functions may not work');
+    updateStatus('Ready for SSH key operations (limited functionality)');
+  }
 });
 </script>
