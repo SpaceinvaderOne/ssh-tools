@@ -53,7 +53,7 @@ check_or_generate_ssh_key() {
         return 0
     else
         debug_log "SSH key already exists at $SSH_KEY_PATH"
-        return 1
+        return 0  # Return success - existing key is fine
     fi
 }
 
@@ -114,6 +114,7 @@ exchange_ssh_keys() {
     
     # Ensure SSH key exists
     check_or_generate_ssh_key
+    log_info "Using SSH key: $SSH_PUB_KEY_PATH"
     
     # Check if keys are already exchanged
     if ssh -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
