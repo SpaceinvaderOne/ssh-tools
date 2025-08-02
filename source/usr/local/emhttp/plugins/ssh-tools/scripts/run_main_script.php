@@ -190,7 +190,7 @@ if (is_resource($process)) {
     if ($exitCode === 0) {
         echo $output;
     } else {
-        echo "Error: " . ($error ?: "Script execution failed");
+        echo "Error: Script execution failed (exit code: $exitCode)" . ($error ? "\nError output: " . $error : "") . ($output ? "\nStdout: " . $output : "");
     }
 } else {
     echo "Error: Failed to start script process";

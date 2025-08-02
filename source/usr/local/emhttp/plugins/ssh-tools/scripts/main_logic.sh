@@ -3,7 +3,7 @@
 # SSH Tools Plugin - Main Logic Script
 # Handles SSH key generation, exchange, and management operations
 
-set -e
+# set -e  # Temporarily disabled to prevent script from exiting on errors
 
 # Constants
 SSH_KEY_TYPE="ed25519"
