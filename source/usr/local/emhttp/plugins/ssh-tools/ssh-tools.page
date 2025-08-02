@@ -120,7 +120,7 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   pointer-events: none;
 }
 
-/* Success popup modal */
+/* Modal system - theme compatible */
 .success-modal {
   display: none;
   position: fixed;
@@ -129,12 +129,13 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   top: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(0, 0, 0, 0.75);
   animation: fadeIn 0.3s ease;
 }
 
 .success-modal-content {
-  background-color: var(--form-bg);
+  background-color: var(--form-bg, #ffffff);
+  color: var(--text-color, #000000);
   margin: 15% auto;
   padding: 30px;
   border: 2px solid #F15A2C;
@@ -142,8 +143,9 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   width: 90%;
   max-width: 500px;
   text-align: center;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   animation: slideIn 0.3s ease;
+  position: relative;
 }
 
 .success-modal h3 {
@@ -154,25 +156,47 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
 }
 
 .success-modal p {
-  margin-bottom: 25px;
+  color: var(--text-color, #000000);
+  margin-bottom: 15px;
   font-size: 14px;
   line-height: 1.4;
 }
 
+.success-modal .modal-buttons {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+  margin-top: 25px;
+}
+
 .success-modal button {
-  background: #F15A2C;
-  color: white;
-  border: none;
   padding: 10px 25px;
   border-radius: 5px;
   cursor: pointer;
   font-size: 14px;
   font-weight: bold;
-  transition: background 0.2s ease;
+  transition: all 0.2s ease;
+  border: none;
+  min-width: 80px;
 }
 
-.success-modal button:hover {
+.success-modal button.primary {
+  background: #F15A2C;
+  color: white;
+}
+
+.success-modal button.primary:hover {
   background: #d4491f;
+}
+
+.success-modal button.secondary {
+  background: var(--button-bg, #e9ecef);
+  color: var(--text-color, #000000);
+  border: 1px solid var(--border-color, #dee2e6);
+}
+
+.success-modal button.secondary:hover {
+  background: var(--button-hover-bg, #f8f9fa);
 }
 
 @keyframes fadeIn {
@@ -329,25 +353,19 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   <pre id="statusOutput">No operations performed yet. Output from plugin operations will appear here.</pre>
 </div>
 
-<!-- Success Modal -->
-<div id="successModal" class="success-modal">
+<!-- Pre-confirmation Modal -->
+<div id="confirmModal" class="success-modal">
   <div class="success-modal-content">
-    <h3>✓ Success!</h3>
-    <p id="successMessage">SSH keys successfully exchanged!</p>
-    <p style="font-size: 12px; color: #666; margin-top: 10px;">Passwordless SSH access is now configured.</p>
-    <button onclick="closeSuccessModal()">OK</button>
+    <h3 id="confirmTitle">SSH Key Exchange</h3>
+    <p id="confirmMessage">This will exchange SSH keys with the target host. Continue?</p>
+    <p style="font-size: 12px; color: var(--text-color, #666); margin-top: 10px;">If keys already exist, they will be added to your tracking list.</p>
+    <div class="modal-buttons">
+      <button class="secondary" onclick="closeConfirmModal()">Cancel</button>
+      <button class="primary" onclick="proceedWithAction()">Continue</button>
+    </div>
   </div>
 </div>
 
-<!-- Rediscovery Modal -->
-<div id="rediscoveryModal" class="success-modal">
-  <div class="success-modal-content">
-    <h3>✓ Keys Found!</h3>
-    <p id="rediscoveryMessage">SSH keys already exist!</p>
-    <p style="font-size: 12px; color: #666; margin-top: 10px;">Added existing connection to your tracking list.</p>
-    <button onclick="closeRediscoveryModal()">OK</button>
-  </div>
-</div>
 
 <script>
 // Make CSRF token available to JavaScript
@@ -416,44 +434,42 @@ function clearStatus() {
   document.getElementById('statusOutput').textContent = 'Output cleared.\n';
 }
 
-// Success modal functions
-function showSuccessModal(hostname) {
-  const modal = document.getElementById('successModal');
-  const message = document.getElementById('successMessage');
-  message.textContent = `SSH keys successfully exchanged with ${hostname}!`;
-  modal.style.display = 'block';
+// Global variables for modal state
+let modalActionData = {};
+
+// Pre-confirmation modal functions
+function showConfirmModal(hostname) {
+  const modal = document.getElementById('confirmModal');
+  const title = document.getElementById('confirmTitle');
+  const message = document.getElementById('confirmMessage');
   
-  // Prevent body scrolling while modal is open
+  // Store data for later use
+  modalActionData = {
+    hostname: hostname,
+    host: document.getElementById('remoteHost').value,
+    username: document.getElementById('remoteUsername').value,
+    password: document.getElementById('remotePassword').value
+  };
+  
+  title.textContent = 'SSH Key Exchange';
+  message.textContent = `This will exchange SSH keys with ${hostname}. If keys already exist, they will be added to your tracking list. Continue?`;
+  document.querySelector('#confirmModal .primary').textContent = 'Continue';
+  
+  modal.style.display = 'block';
   document.body.style.overflow = 'hidden';
 }
 
-function closeSuccessModal() {
-  const modal = document.getElementById('successModal');
+function closeConfirmModal() {
+  const modal = document.getElementById('confirmModal');
   modal.style.display = 'none';
   document.body.style.overflow = 'auto';
-  
-  // Auto-navigate to Exchanged Keys tab
-  showTab('keys');
+  modalActionData = {};
 }
 
-// Rediscovery modal functions
-function showRediscoveryModal(hostname) {
-  const modal = document.getElementById('rediscoveryModal');
-  const message = document.getElementById('rediscoveryMessage');
-  message.textContent = `SSH keys already exist with ${hostname}`;
-  modal.style.display = 'block';
-  
-  // Prevent body scrolling while modal is open
-  document.body.style.overflow = 'hidden';
-}
-
-function closeRediscoveryModal() {
-  const modal = document.getElementById('rediscoveryModal');
-  modal.style.display = 'none';
-  document.body.style.overflow = 'auto';
-  
-  // Auto-navigate to Exchanged Keys tab
-  showTab('keys');
+function proceedWithAction() {
+  closeConfirmModal();
+  // Perform the exchange operation (handles both new exchange and rediscovery)
+  performSSHKeyExchange();
 }
 
 // Button loading state management
@@ -536,39 +552,30 @@ function exchangeSSHKeys() {
     return;
   }
   
-  if (!confirm('This will exchange SSH keys with ' + host + '. Continue?')) {
-    return;
-  }
+  // Show confirmation modal first
+  showConfirmModal(host);
+}
+
+function performSSHKeyExchange() {
+  const postData = {
+    host: modalActionData.host,
+    username: modalActionData.username,
+    password: modalActionData.password
+  };
   
   setButtonLoading('exchangeBtn', true);
-  updateStatus('Exchanging SSH keys with ' + host + '...');
-  
-  const postData = {
-    host: host,
-    username: username,
-    password: password
-  };
+  updateStatus(`Processing SSH keys for ${modalActionData.hostname}...`);
   
   executeOperation('exchange_keys', postData, function(response) {
     setButtonLoading('exchangeBtn', false);
     smartUpdateStatus(response);
     
-    // Check if the operation was successful and determine the type
-    if (response.toLowerCase().includes('successfully') || response.toLowerCase().includes('added to tracking list successfully')) {
-      // Determine if this was a new exchange or rediscovery
-      if (response.toLowerCase().includes('existing ssh key exchange added to tracking list successfully') || 
-          response.toLowerCase().includes('ssh keys already exchanged')) {
-        // This was a rediscovery - keys already existed
-        showRediscoveryModal(host);
-      } else {
-        // This was a new exchange
-        showSuccessModal(host);
-      }
-      
-      // Refresh data in background for when user reaches Exchanged Keys tab
+    // Auto-navigate to Exchanged Keys tab after successful operation
+    if (response.toLowerCase().includes('successfully')) {
       setTimeout(function() {
         checkKeyStatus();
         refreshExchangedKeys();
+        showTab('keys');
       }, 500);
     }
   }, function() {
