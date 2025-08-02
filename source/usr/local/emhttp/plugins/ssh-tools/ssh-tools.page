@@ -144,7 +144,8 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   animation: slideIn 0.3s ease;
   position: relative;
-  /* No background-color or color - inherits from Unraid theme */
+  background-color: var(--gray-50, #f9fafb);
+  /* Using Unraid's theme-aware gray variable for modal background */
 }
 
 .success-modal h3 {
