@@ -109,6 +109,13 @@ exchange_ssh_keys() {
     # Check if keys are already exchanged
     if ssh -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
         log_info "SSH keys already exchanged with ${username}@${host}"
+        log_info "Adding existing exchange to tracking list..."
+        
+        # Record the existing exchange (rediscovery feature)
+        echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}" >> "$EXCHANGED_KEYS_FILE"
+        debug_log "Exchange recorded: $(tail -1 "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo 'Failed to read tracking file')"
+        
+        log_info "Existing SSH key exchange added to tracking list successfully!"
         return 0
     fi
     

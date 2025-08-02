@@ -134,6 +134,7 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   
   <div style="margin-bottom: 15px; padding: 10px; border-radius: 5px; border-left: 4px solid #FF9800;">
     <strong>Note:</strong> This will generate an ed25519 SSH key if one doesn't exist, then exchange it with the target machine. 
+    If keys are already exchanged, it will add the existing connection to your tracking list (useful after plugin reinstall).
     Essential for passwordless SSH connections needed for ZFS replication, rsync, and remote management.
   </div>
   
@@ -173,7 +174,7 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
           <button type="button" onclick="testConnection()" id="testBtn">Test Connection</button>
           <button type="button" onclick="exchangeSSHKeys()" id="exchangeBtn">Exchange SSH Keys Now</button>
         </span>
-        <div class="description">Test the connection first, then exchange keys for passwordless SSH access</div>
+        <div class="description">Test the connection first, then exchange keys for passwordless SSH access (or rediscover existing exchanges)</div>
       </dd>
     </dl>
   </form>
