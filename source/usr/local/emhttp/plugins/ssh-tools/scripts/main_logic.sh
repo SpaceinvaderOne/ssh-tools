@@ -186,25 +186,27 @@ list_exchanged_keys() {
     if [[ -f "$EXCHANGED_KEYS_FILE" ]]; then
         echo "<h4>Successfully Exchanged Keys:</h4>"
         
-        # Debug: Show file contents
-        debug_log "Exchanged keys file contents:"
-        debug_log "$(cat "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo 'Failed to read file')"
-        debug_log "Line count: $(wc -l < "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo '0')"
+        # Debug: Show file contents (visible in web interface)
+        log_info "DEBUG: Exchanged keys file contents:"
+        log_info "$(cat "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo 'Failed to read file')"
+        log_info "DEBUG: Line count: $(wc -l < "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo '0')"
         
         if [[ -s "$EXCHANGED_KEYS_FILE" ]]; then
             echo "<div style='margin-bottom: 15px;'>"
             
+            entry_count=0
             while IFS= read -r line; do
                 if [[ -n "$line" ]]; then
+                    ((entry_count++))
                     # Parse the line: "YYYY-MM-DD HH:MM:SS user@host"
                     timestamp=$(echo "$line" | awk '{print $1, $2}')
                     connection=$(echo "$line" | awk '{print $3}')
                     username=$(echo "$connection" | cut -d'@' -f1)
                     hostname=$(echo "$connection" | cut -d'@' -f2)
                     
-                    # Debug logging
-                    debug_log "Processing line: $line"
-                    debug_log "Parsed - timestamp: $timestamp, connection: $connection, username: $username, hostname: $hostname"
+                    # Debug logging (visible in web interface)
+                    log_info "DEBUG: Processing line: $line"
+                    log_info "DEBUG: Parsed - timestamp: $timestamp, connection: $connection, username: $username, hostname: $hostname"
                     
                     # Test if connection is still active
                     status_color="#28a745"
@@ -227,6 +229,7 @@ list_exchanged_keys() {
                 fi
             done < "$EXCHANGED_KEYS_FILE"
             
+            log_info "DEBUG: Processed $entry_count entries total"
             echo "</div>"
         else
             echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
