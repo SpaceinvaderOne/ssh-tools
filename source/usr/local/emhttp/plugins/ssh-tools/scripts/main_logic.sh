@@ -186,20 +186,29 @@ list_exchanged_keys() {
     if [[ -f "$EXCHANGED_KEYS_FILE" ]]; then
         echo "<h4>Successfully Exchanged Keys:</h4>"
         
+        # Debug: Show file contents
+        debug_log "Exchanged keys file contents:"
+        debug_log "$(cat "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo 'Failed to read file')"
+        debug_log "Line count: $(wc -l < "$EXCHANGED_KEYS_FILE" 2>/dev/null || echo '0')"
+        
         if [[ -s "$EXCHANGED_KEYS_FILE" ]]; then
             echo "<div style='margin-bottom: 15px;'>"
             
             while IFS= read -r line; do
                 if [[ -n "$line" ]]; then
                     # Parse the line: "YYYY-MM-DD HH:MM:SS user@host"
-                    local timestamp=$(echo "$line" | awk '{print $1, $2}')
-                    local connection=$(echo "$line" | awk '{print $3}')
-                    local username=$(echo "$connection" | cut -d'@' -f1)
-                    local hostname=$(echo "$connection" | cut -d'@' -f2)
+                    timestamp=$(echo "$line" | awk '{print $1, $2}')
+                    connection=$(echo "$line" | awk '{print $3}')
+                    username=$(echo "$connection" | cut -d'@' -f1)
+                    hostname=$(echo "$connection" | cut -d'@' -f2)
+                    
+                    # Debug logging
+                    debug_log "Processing line: $line"
+                    debug_log "Parsed - timestamp: $timestamp, connection: $connection, username: $username, hostname: $hostname"
                     
                     # Test if connection is still active
-                    local status_color="#28a745"
-                    local status_text="✓ Active"
+                    status_color="#28a745"
+                    status_text="✓ Active"
                     if ! ssh -o BatchMode=yes -o ConnectTimeout=3 "${connection}" true 2>/dev/null; then
                         status_color="#dc3545"
                         status_text="✗ Inactive"
