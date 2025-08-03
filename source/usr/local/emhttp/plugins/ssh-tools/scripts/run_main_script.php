@@ -42,12 +42,12 @@ function validateInput($input, $type, $maxLength = 512) {
     
     switch ($type) {
         case 'host':
-            // Basic hostname/IP validation
+            // Basic hostname/IP validation - allow host:port format
             if (strlen($input) > $maxLength) {
                 return ['error' => "Input too long (max: $maxLength characters)"];
             }
-            // Allow hostnames, IP addresses, but prevent command injection
-            if (!preg_match('/^[a-zA-Z0-9.-]+$/', $input)) {
+            // Allow hostnames, IP addresses, and host:port format, but prevent command injection
+            if (!preg_match('/^[a-zA-Z0-9.:-]+$/', $input)) {
                 return ['error' => 'Invalid characters in hostname/IP'];
             }
             return ['value' => trim($input)];
