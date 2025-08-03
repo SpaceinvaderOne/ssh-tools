@@ -652,6 +652,18 @@ echo "DEBUG: Temporary file creation test passed"
 
 # Try the actual grep operation with detailed error reporting
 echo "DEBUG: Running grep command to remove key material"
+echo "DEBUG: Key material length: ${#OUR_KEY_MATERIAL}"
+echo "DEBUG: Key material starts with: ${OUR_KEY_MATERIAL:0:30}..."
+echo "DEBUG: Key material ends with: ...${OUR_KEY_MATERIAL: -30}"
+echo "DEBUG: Authorized keys file content:"
+cat -n "$AUTH_KEYS_FILE" | head -5
+echo "DEBUG: Grep test - looking for key in file:"
+if grep -F -q "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE"; then
+    echo "DEBUG: Key material FOUND in authorized_keys"
+else
+    echo "DEBUG: Key material NOT FOUND in authorized_keys"
+fi
+echo "DEBUG: Now attempting removal with grep -F -v"
 if grep -F -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp" 2>&1; then
     echo "DEBUG: Grep command succeeded, checking results"
     
