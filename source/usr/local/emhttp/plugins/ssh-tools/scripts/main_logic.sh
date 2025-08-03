@@ -631,14 +631,49 @@ if ! cp "$AUTH_KEYS_FILE" "${AUTH_KEYS_FILE}.backup.$(date +%Y%m%d_%H%M%S)" 2>/d
     exit 2
 fi
 
-# Atomic removal: write to temp file first, then move
-if grep -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp"; then
-    # Verify the key was actually removed
-    if grep -q "$OUR_KEY_MATERIAL" "${AUTH_KEYS_FILE}.tmp"; then
-        rm -f "${AUTH_KEYS_FILE}.tmp" 2>/dev/null || true
-        echo "ERROR: Key still present after removal attempt"
+# Enhanced atomic removal with better error handling
+echo "DEBUG: Attempting to create temporary file: ${AUTH_KEYS_FILE}.tmp"
+echo "DEBUG: Current working directory: $(pwd)"
+echo "DEBUG: Home directory: $HOME"
+echo "DEBUG: User: $(whoami)"
+echo "DEBUG: Auth keys file: $AUTH_KEYS_FILE"
+echo "DEBUG: File exists: $(test -f "$AUTH_KEYS_FILE" && echo "yes" || echo "no")"
+echo "DEBUG: File readable: $(test -r "$AUTH_KEYS_FILE" && echo "yes" || echo "no")"
+echo "DEBUG: Directory writable: $(test -w "$(dirname "$AUTH_KEYS_FILE")" && echo "yes" || echo "no")"
+
+# Test if we can create a simple temp file first
+if ! touch "${AUTH_KEYS_FILE}.test_tmp" 2>/dev/null; then
+    echo "ERROR: Cannot create test temporary file in SSH directory"
+    echo "DEBUG: Directory permissions: $(ls -ld "$(dirname "$AUTH_KEYS_FILE")" 2>/dev/null || echo "cannot check")"
+    exit 1
+fi
+rm -f "${AUTH_KEYS_FILE}.test_tmp" 2>/dev/null || true
+echo "DEBUG: Temporary file creation test passed"
+
+# Try the actual grep operation with detailed error reporting
+echo "DEBUG: Running grep command to remove key material"
+if grep -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp" 2>&1; then
+    echo "DEBUG: Grep command succeeded, checking results"
+    
+    # Verify the temporary file was created and has content
+    if [[ ! -f "${AUTH_KEYS_FILE}.tmp" ]]; then
+        echo "ERROR: Temporary file was not created despite successful grep"
         exit 1
     fi
+    
+    echo "DEBUG: Temporary file created successfully"
+    echo "DEBUG: Original file lines: $(wc -l < "$AUTH_KEYS_FILE" 2>/dev/null || echo "unknown")"
+    echo "DEBUG: Temp file lines: $(wc -l < "${AUTH_KEYS_FILE}.tmp" 2>/dev/null || echo "unknown")"
+    
+    # Verify the key was actually removed
+    if grep -q "$OUR_KEY_MATERIAL" "${AUTH_KEYS_FILE}.tmp"; then
+        echo "ERROR: Key still present after removal attempt"
+        echo "DEBUG: Key material found in temp file - removal failed"
+        rm -f "${AUTH_KEYS_FILE}.tmp" 2>/dev/null || true
+        exit 1
+    fi
+    
+    echo "DEBUG: Key successfully removed from temp file, performing atomic move"
     
     # Atomic move and set permissions
     if mv "${AUTH_KEYS_FILE}.tmp" "$AUTH_KEYS_FILE"; then
@@ -647,12 +682,16 @@ if grep -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp"; then
         echo "Successfully removed SSH key from authorized_keys"
         echo "Key removal verified and file permissions secured"
     else
+        echo "ERROR: Failed to replace authorized_keys file with temp file"
         rm -f "${AUTH_KEYS_FILE}.tmp" 2>/dev/null || true
-        echo "ERROR: Failed to replace authorized_keys file"
         exit 1
     fi
 else
-    echo "ERROR: Failed to create temporary file for key removal"
+    grep_exit_code=$?
+    echo "ERROR: Grep command failed with exit code: $grep_exit_code"
+    echo "DEBUG: Failed to create temporary file for key removal"
+    echo "DEBUG: This could be due to file system permissions, disk space, or file locks"
+    rm -f "${AUTH_KEYS_FILE}.tmp" 2>/dev/null || true
     exit 1
 fi
 EOF
