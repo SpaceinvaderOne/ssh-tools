@@ -664,7 +664,13 @@ else
     echo "DEBUG: Key material NOT FOUND in authorized_keys"
 fi
 echo "DEBUG: Now attempting removal with grep -F -v"
-if grep -F -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp" 2>&1; then
+# Note: grep -v returns exit code 1 when output is empty (all lines removed), which is valid
+grep -F -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp" 2>&1
+grep_exit_code=$?
+echo "DEBUG: Grep -v exit code: $grep_exit_code"
+
+# Exit codes: 0=success with output, 1=no output (empty file), 2=error
+if [[ $grep_exit_code -eq 0 ]] || [[ $grep_exit_code -eq 1 ]]; then
     echo "DEBUG: Grep command succeeded, checking results"
     
     # Verify the temporary file was created and has content
@@ -699,9 +705,9 @@ if grep -F -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp" 2>
         exit 1
     fi
 else
-    grep_exit_code=$?
+    # Only true errors (exit code 2 or higher)
     echo "ERROR: Grep command failed with exit code: $grep_exit_code"
-    echo "DEBUG: Failed to create temporary file for key removal"
+    echo "DEBUG: This indicates a true error (not empty output)"
     echo "DEBUG: This could be due to file system permissions, disk space, or file locks"
     rm -f "${AUTH_KEYS_FILE}.tmp" 2>/dev/null || true
     exit 1
