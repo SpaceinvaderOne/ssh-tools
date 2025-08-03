@@ -335,7 +335,7 @@ function showTab(tabId) {
 function updateStatus(message, type = 'info') {
   const statusOutput = document.getElementById('statusOutput');
   const timestamp = new Date().toLocaleTimeString();
-  const formattedMessage = `[${timestamp}] ${message}`;
+  const formattedMessage = '[' + timestamp + '] ' + message;
   
   statusOutput.textContent += formattedMessage + '\n';
   statusOutput.scrollTop = statusOutput.scrollHeight;
@@ -345,7 +345,7 @@ function updateStatus(message, type = 'info') {
 function setStatus(message, type = 'info') {
   const statusOutput = document.getElementById('statusOutput');
   const timestamp = new Date().toLocaleTimeString();
-  const formattedMessage = `[${timestamp}] ${message}`;
+  const formattedMessage = '[' + timestamp + '] ' + message;
   
   statusOutput.textContent = formattedMessage + '\n';
   statusOutput.scrollTop = statusOutput.scrollHeight;
@@ -372,12 +372,12 @@ function showConfirmModal(hostname) {
   
   // Format display hostname with port if non-standard
   const displayHost = modalActionData.port && modalActionData.port != 22 
-    ? `${hostname}:${modalActionData.port}` 
+    ? hostname + ':' + modalActionData.port
     : hostname;
   
   swal({
     title: 'SSH Key Exchange',
-    text: `This will exchange SSH keys with ${displayHost}. If keys already exist, they will be added to your tracking list. Continue?`,
+    text: 'This will exchange SSH keys with ' + displayHost + '. If keys already exist, they will be added to your tracking list. Continue?',
     type: 'warning',
     showCancelButton: true,
     confirmButtonText: 'Continue',
@@ -452,7 +452,7 @@ function testConnection() {
   setButtonLoading('testBtn', true);
   
   // Format display hostname with port if non-standard
-  const displayHost = port && port != 22 ? `${host}:${port}` : host;
+  const displayHost = port && port != 22 ? host + ':' + port : host;
   updateStatus('Testing connection to ' + displayHost + '...');
   
   const postData = {
@@ -497,10 +497,10 @@ function performSSHKeyExchange() {
   
   // Format display hostname with port if non-standard
   const displayHost = modalActionData.port && modalActionData.port != 22 
-    ? `${modalActionData.hostname}:${modalActionData.port}` 
+    ? modalActionData.hostname + ':' + modalActionData.port
     : modalActionData.hostname;
   
-  updateStatus(`Processing SSH keys for ${displayHost}...`);
+  updateStatus('Processing SSH keys for ' + displayHost + '...');
   
   executeOperation('exchange_keys', postData, function(response) {
     setButtonLoading('exchangeBtn', false);
@@ -510,7 +510,7 @@ function performSSHKeyExchange() {
     if (response.toLowerCase().includes('successfully')) {
       swal({
         title: 'Success!',
-        text: `SSH keys have been successfully exchanged with ${displayHost}`,
+        text: 'SSH keys have been successfully exchanged with ' + displayHost,
         type: 'success',
         confirmButtonText: 'View Exchanged Keys',
         closeOnConfirm: true
@@ -596,7 +596,7 @@ function refreshAuthorizedKeys() {
 function deleteAuthorizedKey(keyId, hostname, lineNumber) {
   swal({
     title: 'Remove Authorized Key?',
-    text: `This will revoke SSH access for <strong>${hostname}</strong>.<br><br>The machine will no longer be able to connect to this server without a password.<br><br>This action cannot be undone.`,
+    text: 'This will revoke SSH access for <strong>' + hostname + '</strong>.<br><br>The machine will no longer be able to connect to this server without a password.<br><br>This action cannot be undone.',
     type: 'warning',
     showCancelButton: true,
     confirmButtonText: 'Remove Access',
@@ -611,7 +611,7 @@ function deleteAuthorizedKey(keyId, hostname, lineNumber) {
 }
 
 function performAuthorizedKeyDeletion(keyId, hostname, lineNumber) {
-  updateStatus(`Removing authorized key for ${hostname}...`);
+  updateStatus('Removing authorized key for ' + hostname + '...');
   
   executeOperation('remove_authorized_key', { 
     key_line_number: lineNumber 
@@ -619,7 +619,7 @@ function performAuthorizedKeyDeletion(keyId, hostname, lineNumber) {
     if (response.toLowerCase().includes('successfully')) {
       swal({
         title: 'Access Revoked!',
-        text: `SSH access has been successfully removed for ${hostname}`,
+        text: 'SSH access has been successfully removed for ' + hostname,
         type: 'success',
         confirmButtonText: 'Continue'
       }, function() {
@@ -647,8 +647,8 @@ function performAuthorizedKeyDeletion(keyId, hostname, lineNumber) {
 
 // Exchanged Keys Revocation Functions
 function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNumber) {
-  console.log('revokeExchangedKey called with:', {keyId, displayHost, hostname, username, port, lineNumber});
-  updateStatus(`Revoke button clicked for ${displayHost}`);
+  console.log('revokeExchangedKey called with:', {keyId: keyId, displayHost: displayHost, hostname: hostname, username: username, port: port, lineNumber: lineNumber});
+  updateStatus('Revoke button clicked for ' + displayHost);
   
   // Store revocation data for later use
   modalActionData = {
@@ -660,19 +660,19 @@ function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNu
     lineNumber: lineNumber
   };
   
-  updateStatus(`Testing connectivity to ${displayHost}...`);
+  updateStatus('Testing connectivity to ' + displayHost + '...');
   
   // First test connectivity to determine which modal to show
   executeOperation('test_single_connection', { 
     host: hostname + (port != 22 ? ':' + port : '')
   }, function(response) {
     console.log('Connectivity test success:', response);
-    updateStatus(`Server ${displayHost} is reachable - showing full revocation modal`);
+    updateStatus('Server ' + displayHost + ' is reachable - showing full revocation modal');
     // Server is reachable - show full revocation modal
     showFullRevocationModal();
   }, function() {
     console.log('Connectivity test failed');
-    updateStatus(`Server ${displayHost} is unreachable - showing fallback modal`);
+    updateStatus('Server ' + displayHost + ' is unreachable - showing fallback modal');
     // Server is unreachable - show fallback modal
     showUnreachableServerModal();
   });
@@ -681,11 +681,11 @@ function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNu
 function showFullRevocationModal() {
   console.log('showFullRevocationModal called');
   const { displayHost } = modalActionData;
-  updateStatus(`Showing full revocation modal for ${displayHost}`);
+  updateStatus('Showing full revocation modal for ' + displayHost);
   
   swal({
     title: 'Revoke SSH Access?',
-    text: `This will remove your SSH key from ${displayHost} and revoke passwordless access.<br><br>✓ Server is reachable - full revocation will be performed.<br><br>This action cannot be undone.`,
+    text: 'This will remove your SSH key from ' + displayHost + ' and revoke passwordless access.<br><br>✓ Server is reachable - full revocation will be performed.<br><br>This action cannot be undone.',
     type: 'warning',
     showCancelButton: true,
     confirmButtonText: 'Revoke Access',
@@ -704,11 +704,11 @@ function showFullRevocationModal() {
 function showUnreachableServerModal() {
   console.log('showUnreachableServerModal called');
   const { displayHost } = modalActionData;
-  updateStatus(`Showing unreachable server modal for ${displayHost}`);
+  updateStatus('Showing unreachable server modal for ' + displayHost);
   
   swal({
     title: 'Server Unreachable - Cannot Remove SSH Key',
-    text: `Cannot connect to ${displayHost} to remove your SSH key.<br><br>💡 <strong>If the server is temporarily offline:</strong><br>Turn it on and try again for complete key removal<br><br>⚠️ <strong>If the server is permanently inaccessible:</strong><br>Continuing will only remove this entry from your list<br>Your SSH key will remain on the remote server<br><br>What would you like to do?`,
+    text: 'Cannot connect to ' + displayHost + ' to remove your SSH key.<br><br>💡 <strong>If the server is temporarily offline:</strong><br>Turn it on and try again for complete key removal<br><br>⚠️ <strong>If the server is permanently inaccessible:</strong><br>Continuing will only remove this entry from your list<br>Your SSH key will remain on the remote server<br><br>What would you like to do?',
     type: 'warning',
     showCancelButton: true,
     showConfirmButton: true,
@@ -732,7 +732,7 @@ function showRetryModal() {
   
   swal({
     title: 'Retry Connection?',
-    text: `Would you like to test connectivity to ${displayHost} again?<br><br>This is useful if you've just turned the server back on.`,
+    text: 'Would you like to test connectivity to ' + displayHost + ' again?<br><br>This is useful if you\'ve just turned the server back on.',
     type: 'question',
     showCancelButton: true,
     confirmButtonText: 'Retry Connection',
@@ -758,7 +758,7 @@ function showRetryModal() {
 function performFullRevocation() {
   const { displayHost, hostname, username, port, lineNumber } = modalActionData;
   
-  updateStatus(`Removing SSH key from ${displayHost}...`);
+  updateStatus('Removing SSH key from ' + displayHost + '...');
   
   executeOperation('revoke_exchanged_key', {
     host: hostname,
@@ -770,7 +770,7 @@ function performFullRevocation() {
     if (response.toLowerCase().includes('successfully')) {
       swal({
         title: 'Access Revoked!',
-        text: `SSH access has been successfully revoked for ${displayHost}`,
+        text: 'SSH access has been successfully revoked for ' + displayHost,
         type: 'success',
         confirmButtonText: 'Continue'
       }, function() {
@@ -800,7 +800,7 @@ function performFullRevocation() {
 function performLocalOnlyRevocation() {
   const { displayHost, lineNumber } = modalActionData;
   
-  updateStatus(`Removing ${displayHost} from tracking list...`);
+  updateStatus('Removing ' + displayHost + ' from tracking list...');
   
   executeOperation('revoke_exchanged_key', {
     line_number: lineNumber,
@@ -809,7 +809,7 @@ function performLocalOnlyRevocation() {
     if (response.toLowerCase().includes('successfully')) {
       swal({
         title: 'Removed from List',
-        text: `${displayHost} has been removed from your tracking list.<br><br>⚠️ Remember: Your SSH key may still exist on the remote server.`,
+        text: displayHost + ' has been removed from your tracking list.<br><br>⚠️ Remember: Your SSH key may still exist on the remote server.',
         type: 'warning',
         confirmButtonText: 'Continue',
         html: true
