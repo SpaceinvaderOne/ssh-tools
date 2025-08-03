@@ -186,6 +186,70 @@ switch ($operation) {
             exit;
         }
         break;
+        
+    case 'revoke_exchanged_key':
+        if (isset($_POST['line_number'])) {
+            $lineNumber = intval($_POST['line_number']);
+            if ($lineNumber <= 0) {
+                echo "Error: Invalid line number";
+                exit;
+            }
+            $env['KEY_LINE_NUMBER'] = $lineNumber;
+        } else {
+            echo "Error: Line number is required for key revocation";
+            exit;
+        }
+        
+        if (isset($_POST['revoke_type'])) {
+            $revokeType = trim($_POST['revoke_type']);
+            if (!in_array($revokeType, ['full', 'local_only'])) {
+                echo "Error: Invalid revoke type";
+                exit;
+            }
+            $env['REVOKE_TYPE'] = $revokeType;
+        } else {
+            echo "Error: Revoke type is required";
+            exit;
+        }
+        
+        // For full revocation, we need connection details
+        if ($revokeType === 'full') {
+            if (isset($_POST['host'])) {
+                $validation = validateInput($_POST['host'], 'host');
+                if (isset($validation['error'])) {
+                    echo "Error: " . $validation['error'];
+                    exit;
+                }
+                $env['REMOTE_HOST'] = $validation['value'];
+            } else {
+                echo "Error: Host is required for full revocation";
+                exit;
+            }
+            
+            if (isset($_POST['username'])) {
+                $validation = validateInput($_POST['username'], 'username');
+                if (isset($validation['error'])) {
+                    echo "Error: " . $validation['error'];
+                    exit;
+                }
+                $env['REMOTE_USERNAME'] = $validation['value'];
+            } else {
+                echo "Error: Username is required for full revocation";
+                exit;
+            }
+            
+            if (isset($_POST['port'])) {
+                $port = intval($_POST['port']);
+                if ($port < 1 || $port > 65535) {
+                    echo "Error: Port must be between 1 and 65535";
+                    exit;
+                }
+                $env['REMOTE_PORT'] = $port;
+            } else {
+                $env['REMOTE_PORT'] = 22;
+            }
+        }
+        break;
 }
 
 // Execute shell script

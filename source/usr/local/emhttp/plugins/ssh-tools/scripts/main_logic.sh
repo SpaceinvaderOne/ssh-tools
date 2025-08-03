@@ -257,6 +257,9 @@ list_exchanged_keys() {
                         display_host="${hostname}:${port}"
                     fi
                     
+                    # Generate unique ID for this exchanged key (using entry count)
+                    local key_id="exchanged_key_${entry_count}"
+                    
                     echo "<div style='margin-bottom: 10px; padding: 12px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;'>"
                     echo "  <div style='display: flex; justify-content: space-between; align-items: center;'>"
                     echo "    <div>"
@@ -264,7 +267,10 @@ list_exchanged_keys() {
                     echo "      <span style='color: #666; margin-left: 10px;'>User: $username</span>"
                     echo "      <div style='font-size: 11px; color: #888; margin-top: 2px;'>Exchanged: $timestamp</div>"
                     echo "    </div>"
-                    echo "    <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
+                    echo "    <div style='display: flex; align-items: center; gap: 15px;'>"
+                    echo "      <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
+                    echo "      <button onclick='revokeExchangedKey(\\\"$key_id\\\", \\\"$display_host\\\", \\\"$hostname\\\", \\\"$username\\\", \\\"$port\\\", $entry_count)' style='background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;' title='Revoke SSH access'>🗑️ Revoke Access</button>"
+                    echo "    </div>"
                     echo "  </div>"
                     echo "</div>"
                 fi
@@ -545,6 +551,132 @@ remove_authorized_key() {
     fi
 }
 
+# Revoke SSH access (remove our public key from remote server)
+revoke_ssh_access_full() {
+    local host="$1"
+    local username="$2"
+    local port="$3"
+    local line_number="$4"
+    
+    log_info "Starting full SSH access revocation for ${username}@${host}:${port}..."
+    
+    # Get our public key content to identify it on the remote server
+    local our_public_key
+    if [[ -f "$SSH_PUB_KEY_PATH" ]]; then
+        our_public_key=$(cat "$SSH_PUB_KEY_PATH" | awk '{print $2}')
+        log_info "Using public key: $SSH_PUB_KEY_PATH"
+    else
+        error_exit "Local public key not found at $SSH_PUB_KEY_PATH"
+    fi
+    
+    # Test connection first
+    if ! ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+        error_exit "Cannot connect to ${username}@${host}:${port} - server may be offline"
+    fi
+    
+    log_info "Connected successfully, removing public key from remote authorized_keys..."
+    
+    # Create a temporary script to run on the remote server
+    local remote_script=$(cat << 'EOF'
+# Remote script to remove our public key
+AUTH_KEYS_FILE="$HOME/.ssh/authorized_keys"
+OUR_KEY_PART="$1"
+
+if [[ ! -f "$AUTH_KEYS_FILE" ]]; then
+    echo "No authorized_keys file found on remote server"
+    exit 1
+fi
+
+# Create backup
+cp "$AUTH_KEYS_FILE" "${AUTH_KEYS_FILE}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+
+# Remove lines containing our key
+if grep -v "$OUR_KEY_PART" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp"; then
+    # Check if anything was actually removed
+    local original_lines=$(wc -l < "$AUTH_KEYS_FILE")
+    local new_lines=$(wc -l < "${AUTH_KEYS_FILE}.tmp")
+    
+    if [[ $original_lines -gt $new_lines ]]; then
+        mv "${AUTH_KEYS_FILE}.tmp" "$AUTH_KEYS_FILE"
+        chmod 600 "$AUTH_KEYS_FILE" 2>/dev/null || true
+        echo "Successfully removed SSH key from authorized_keys"
+        echo "Removed $((original_lines - new_lines)) key(s)"
+    else
+        rm -f "${AUTH_KEYS_FILE}.tmp" 2>/dev/null || true
+        echo "Key not found in authorized_keys file"
+        exit 1
+    fi
+else
+    echo "Failed to process authorized_keys file"
+    exit 1
+fi
+EOF
+)
+    
+    # Execute the remote script
+    if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=10 "${username}@${host}" "bash -s '$our_public_key'" <<< "$remote_script" 2>/dev/null; then
+        log_info "Successfully removed public key from remote server"
+        
+        # Remove from local tracking file
+        revoke_ssh_access_local "$line_number"
+        
+        log_info "Full SSH access revocation completed successfully"
+        return 0
+    else
+        error_exit "Failed to remove public key from remote server"
+    fi
+}
+
+# Remove SSH connection from local tracking only
+revoke_ssh_access_local() {
+    local line_number="$1"
+    
+    if [[ -z "$line_number" ]] || ! [[ "$line_number" =~ ^[0-9]+$ ]]; then
+        error_exit "Invalid line number for local revocation"
+    fi
+    
+    if [[ ! -f "$EXCHANGED_KEYS_FILE" ]]; then
+        error_exit "No exchanged keys file found"
+    fi
+    
+    log_info "Removing entry from local tracking list..."
+    
+    # Create backup of exchanged keys file
+    local backup_file="${EXCHANGED_KEYS_FILE}.backup.$(date +%Y%m%d_%H%M%S)"
+    cp "$EXCHANGED_KEYS_FILE" "$backup_file" 2>/dev/null || true
+    
+    # Count total lines in file
+    local total_lines=$(wc -l < "$EXCHANGED_KEYS_FILE")
+    
+    if [[ $line_number -gt $total_lines ]]; then
+        error_exit "Line number $line_number exceeds file length ($total_lines lines)"
+    fi
+    
+    # Create temporary file without the specified line
+    local temp_file=$(mktemp)
+    
+    # Copy all lines except the one to be removed
+    sed "${line_number}d" "$EXCHANGED_KEYS_FILE" > "$temp_file"
+    
+    # Verify the operation succeeded
+    if [[ $? -eq 0 ]] && [[ -f "$temp_file" ]]; then
+        # Replace original file
+        mv "$temp_file" "$EXCHANGED_KEYS_FILE"
+        
+        # Set proper permissions
+        chmod 644 "$EXCHANGED_KEYS_FILE" 2>/dev/null || true
+        
+        log_info "Successfully removed entry from tracking list"
+        log_info "Backup created: $backup_file"
+        
+        return 0
+    else
+        # Cleanup temp file if something went wrong
+        rm -f "$temp_file" 2>/dev/null || true
+        error_exit "Failed to remove entry from tracking list"
+    fi
+}
+
 # Main logic dispatcher
 process_operation() {
     local operation="$1"
@@ -591,6 +723,25 @@ process_operation() {
                 error_exit "Missing line number parameter for key removal"
             fi
             remove_authorized_key "$KEY_LINE_NUMBER"
+            ;;
+        "revoke_exchanged_key")
+            if [[ -z "$KEY_LINE_NUMBER" ]]; then
+                error_exit "Missing line number parameter for key revocation"
+            fi
+            if [[ -z "$REVOKE_TYPE" ]]; then
+                error_exit "Missing revoke type parameter"
+            fi
+            
+            if [[ "$REVOKE_TYPE" == "full" ]]; then
+                if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USERNAME" ]]; then
+                    error_exit "Missing required parameters for full revocation"
+                fi
+                revoke_ssh_access_full "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PORT" "$KEY_LINE_NUMBER"
+            elif [[ "$REVOKE_TYPE" == "local_only" ]]; then
+                revoke_ssh_access_local "$KEY_LINE_NUMBER"
+            else
+                error_exit "Invalid revoke type: $REVOKE_TYPE"
+            fi
             ;;
         *)
             error_exit "Unknown operation: $operation"
