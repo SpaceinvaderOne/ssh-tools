@@ -656,6 +656,10 @@ function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNu
   // Test connection first
   updateStatus('Testing connection to ' + displayHost + '...');
   
+  // Record start time for minimum modal display duration
+  const modalStartTime = Date.now();
+  const minimumDisplayTime = 2000; // 2 seconds minimum
+  
   swal({
     title: 'Testing Connection',
     text: 'Checking if ' + displayHost + ' is reachable...',
@@ -669,27 +673,48 @@ function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNu
     host: hostname + ':' + port 
   }, function(response) {
     console.log('Connection test response:', response);
-    swal.close();
     
-    // Wait a moment for the modal to fully close before showing the next one
+    // Calculate how long the modal has been displayed
+    const elapsedTime = Date.now() - modalStartTime;
+    const remainingTime = Math.max(0, minimumDisplayTime - elapsedTime);
+    
+    console.log('Modal displayed for:', elapsedTime + 'ms, waiting additional:', remainingTime + 'ms');
+    
+    // Wait for the minimum display time before closing the modal
     setTimeout(function() {
-      if (response.toLowerCase().includes('successful')) {
-        console.log('Server is reachable - showing full revocation modal');
-        // Server is reachable - show full revocation modal
-        showFullRevocationModal(keyId, displayHost, hostname, username, port, lineNumber);
-      } else {
-        console.log('Server is unreachable - showing unreachable modal');
-        // Server is unreachable - show local-only modal with educational info
-        showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
-      }
-    }, 300); // 300ms delay to ensure modal is fully closed
+      swal.close();
+      
+      // Wait a moment for the modal to fully close before showing the next one
+      setTimeout(function() {
+        if (response.toLowerCase().includes('successful')) {
+          console.log('Server is reachable - showing full revocation modal');
+          // Server is reachable - show full revocation modal
+          showFullRevocationModal(keyId, displayHost, hostname, username, port, lineNumber);
+        } else {
+          console.log('Server is unreachable - showing unreachable modal');
+          // Server is unreachable - show local-only modal with educational info
+          showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
+        }
+      }, 300); // 300ms delay to ensure modal is fully closed
+    }, remainingTime);
   }, function() {
     console.log('Connection test failed - showing unreachable modal');
-    swal.close();
-    // Wait a moment for the modal to fully close before showing the next one
+    
+    // Calculate how long the modal has been displayed
+    const elapsedTime = Date.now() - modalStartTime;
+    const remainingTime = Math.max(0, minimumDisplayTime - elapsedTime);
+    
+    console.log('Modal displayed for:', elapsedTime + 'ms, waiting additional:', remainingTime + 'ms');
+    
+    // Wait for the minimum display time before closing the modal
     setTimeout(function() {
-      showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
-    }, 300);
+      swal.close();
+      
+      // Wait a moment for the modal to fully close before showing the next one
+      setTimeout(function() {
+        showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
+      }, 300);
+    }, remainingTime);
   });
 }
 
