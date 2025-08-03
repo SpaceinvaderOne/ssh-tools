@@ -743,6 +743,63 @@ function showFullRevocationModal(keyId, displayHost, hostname, username, port, l
   });
 }
 
+function performFullRevocation(keyId, displayHost, hostname, username, port, lineNumber) {
+  updateStatus('Performing full SSH access revocation for ' + displayHost + '...');
+  
+  swal({
+    title: 'Revoking Access...',
+    text: 'Testing permissions and removing SSH key from remote server...',
+    type: 'info',
+    showConfirmButton: false,
+    allowOutsideClick: false
+  });
+  
+  executeOperation('revoke_exchanged_key', {
+    line_number: lineNumber,
+    revoke_type: 'full',
+    host: hostname,
+    username: username,
+    port: port
+  }, function(response) {
+    console.log('Full revocation response:', response);
+    
+    if (response.toLowerCase().includes('successfully')) {
+      swal({
+        title: 'Access Revoked!',
+        html: 'SSH access has been successfully revoked for <strong>' + displayHost + '</strong>.<br><br>' +
+              '✓ Key removed from remote server<br>' +
+              '✓ Removed from local tracking<br>' +
+              '✓ File permissions secured<br><br>' +
+              'The remote server can no longer use passwordless SSH to connect.',
+        type: 'success',
+        confirmButtonText: 'Continue'
+      }, function() {
+        refreshExchangedKeys();
+        smartUpdateStatus(response);
+      });
+    } else if (response.includes('PERMISSION_ERROR:')) {
+      showPermissionRestrictedModal(keyId, displayHost, hostname, username, port, lineNumber, response);
+    } else if (response.includes('KEY_NOT_FOUND:')) {
+      showKeyNotFoundModal(keyId, displayHost, hostname, username, port, lineNumber, response);
+    } else {
+      swal({
+        title: 'Revocation Failed',
+        html: 'Failed to revoke SSH access for <strong>' + displayHost + '</strong>.<br><br>' +
+              'Error details:<br>' + response.replace(/\n/g, '<br>'),
+        type: 'error',
+        confirmButtonText: 'OK'
+      });
+    }
+  }, function() {
+    swal({
+      title: 'Error',
+      text: 'Failed to communicate with the server during revocation',
+      type: 'error',
+      confirmButtonText: 'OK'
+    });
+  });
+}
+
 function retryRevocationConnection(keyId, displayHost, hostname, username, port, lineNumber) {
   swal.close();
   revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNumber);
