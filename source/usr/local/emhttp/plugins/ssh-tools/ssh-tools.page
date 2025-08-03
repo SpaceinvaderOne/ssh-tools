@@ -668,16 +668,20 @@ function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNu
   executeOperation('test_single_connection', { 
     host: hostname + ':' + port 
   }, function(response) {
+    console.log('Connection test response:', response);
     swal.close();
     
     if (response.toLowerCase().includes('successful')) {
+      console.log('Server is reachable - showing full revocation modal');
       // Server is reachable - show full revocation modal
       showFullRevocationModal(keyId, displayHost, hostname, username, port, lineNumber);
     } else {
+      console.log('Server is unreachable - showing unreachable modal');
       // Server is unreachable - show local-only modal with educational info
       showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
     }
   }, function() {
+    console.log('Connection test failed - showing unreachable modal');
     swal.close();
     // Connection test failed - show unreachable modal
     showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
@@ -685,6 +689,7 @@ function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNu
 }
 
 function showFullRevocationModal(keyId, displayHost, hostname, username, port, lineNumber) {
+  console.log('showFullRevocationModal called with:', {keyId, displayHost, hostname, username, port, lineNumber});
   swal({
     title: 'Revoke SSH Access',
     html: 'This will remove SSH access for <strong>' + displayHost + '</strong>.<br><br>' +
