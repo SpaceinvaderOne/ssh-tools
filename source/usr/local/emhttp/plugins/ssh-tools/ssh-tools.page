@@ -647,6 +647,9 @@ function performAuthorizedKeyDeletion(keyId, hostname, lineNumber) {
 
 // Exchanged Keys Revocation Functions
 function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNumber) {
+  console.log('revokeExchangedKey called with:', {keyId, displayHost, hostname, username, port, lineNumber});
+  updateStatus(`Revoke button clicked for ${displayHost}`);
+  
   // Store revocation data for later use
   modalActionData = {
     keyId: keyId,
@@ -663,16 +666,22 @@ function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNu
   executeOperation('test_single_connection', { 
     host: hostname + (port != 22 ? ':' + port : '')
   }, function(response) {
+    console.log('Connectivity test success:', response);
+    updateStatus(`Server ${displayHost} is reachable - showing full revocation modal`);
     // Server is reachable - show full revocation modal
     showFullRevocationModal();
   }, function() {
+    console.log('Connectivity test failed');
+    updateStatus(`Server ${displayHost} is unreachable - showing fallback modal`);
     // Server is unreachable - show fallback modal
     showUnreachableServerModal();
   });
 }
 
 function showFullRevocationModal() {
+  console.log('showFullRevocationModal called');
   const { displayHost } = modalActionData;
+  updateStatus(`Showing full revocation modal for ${displayHost}`);
   
   swal({
     title: 'Revoke SSH Access?',
@@ -693,7 +702,9 @@ function showFullRevocationModal() {
 }
 
 function showUnreachableServerModal() {
+  console.log('showUnreachableServerModal called');
   const { displayHost } = modalActionData;
+  updateStatus(`Showing unreachable server modal for ${displayHost}`);
   
   swal({
     title: 'Server Unreachable - Cannot Remove SSH Key',
