@@ -719,6 +719,30 @@ function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNu
   });
 }
 
+function showFullRevocationModal(keyId, displayHost, hostname, username, port, lineNumber) {
+  console.log('showFullRevocationModal called with:', {keyId, displayHost, hostname, username, port, lineNumber});
+  
+  swal({
+    title: 'Revoke SSH Access',
+    html: 'This will remove SSH access for <strong>' + displayHost + '</strong>.<br><br>' +
+          '<strong>Full Revocation:</strong><br>' +
+          '• Remove our public key from the remote server<br>' +
+          '• Remove connection from local tracking list<br><br>' +
+          'The remote machine will no longer allow passwordless SSH access from this server.<br><br>' +
+          'This action cannot be undone.',
+    type: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Revoke Access',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: '#d33',
+    closeOnConfirm: false
+  }, function(isConfirm) {
+    if (isConfirm) {
+      performFullRevocation(keyId, displayHost, hostname, username, port, lineNumber);
+    }
+  });
+}
+
 function retryRevocationConnection(keyId, displayHost, hostname, username, port, lineNumber) {
   swal.close();
   revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNumber);
