@@ -649,7 +649,189 @@ function performAuthorizedKeyDeletion(keyId, hostname, lineNumber) {
   });
 }
 
-// Exchanged Keys Revocation Functions - TEMPORARILY REMOVED FOR DEBUGGING
+// Exchanged Keys Revocation Functions
+function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNumber) {
+  console.log('revokeExchangedKey called with:', {keyId, displayHost, hostname, username, port, lineNumber});
+  
+  // Test connection first
+  updateStatus('Testing connection to ' + displayHost + '...');
+  
+  swal({
+    title: 'Testing Connection',
+    text: 'Checking if ' + displayHost + ' is reachable...',
+    type: 'info',
+    showConfirmButton: false,
+    allowOutsideClick: false
+  });
+  
+  // Test SSH connectivity first
+  executeOperation('test_single_connection', { 
+    host: hostname + ':' + port 
+  }, function(response) {
+    swal.close();
+    
+    if (response.toLowerCase().includes('successful')) {
+      // Server is reachable - show full revocation modal
+      showFullRevocationModal(keyId, displayHost, hostname, username, port, lineNumber);
+    } else {
+      // Server is unreachable - show local-only modal with educational info
+      showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
+    }
+  }, function() {
+    swal.close();
+    // Connection test failed - show unreachable modal
+    showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
+  });
+}
+
+function showFullRevocationModal(keyId, displayHost, hostname, username, port, lineNumber) {
+  swal({
+    title: 'Revoke SSH Access',
+    html: 'This will remove SSH access for <strong>' + displayHost + '</strong>.<br><br>' +
+          '<strong>Full Revocation:</strong><br>' +
+          '• Remove our public key from the remote server<br>' +
+          '• Remove connection from local tracking list<br><br>' +
+          'The remote machine will no longer allow passwordless SSH access from this server.<br><br>' +
+          'This action cannot be undone.',
+    type: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Revoke Access',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: '#d33',
+    closeOnConfirm: false
+  }, function(isConfirm) {
+    if (isConfirm) {
+      performFullRevocation(keyId, displayHost, hostname, username, port, lineNumber);
+    }
+  });
+}
+
+function showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber) {
+  swal({
+    title: 'Server Unreachable',
+    html: 'Cannot connect to <strong>' + displayHost + '</strong>.<br><br>' +
+          '<strong>Options:</strong><br><br>' +
+          '<strong>Local Remove Only:</strong> Remove from tracking list only. The remote server will still have our public key and could potentially connect if brought back online.<br><br>' +
+          '<strong>Full Revocation:</strong> For complete security, ensure the server is powered on and accessible, then try again to remove the key from both locations.<br><br>' +
+          'What would you like to do?',
+    type: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Remove Locally Only',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: '#ffc107',
+    closeOnConfirm: false,
+    html: true
+  }, function(isConfirm) {
+    if (isConfirm) {
+      // User chose local removal only
+      performLocalRevocation(keyId, displayHost, hostname, username, port, lineNumber);
+    }
+  });
+  
+  // Add a custom "Retry Connection" button
+  setTimeout(function() {
+    if ($('.swal-footer').length === 0) {
+      $('.swal-modal').append('<div class="swal-footer" style="text-align: center; padding: 10px;"><button onclick="retryRevocationConnection(' + 
+        JSON.stringify(keyId) + ', ' + JSON.stringify(displayHost) + ', ' + JSON.stringify(hostname) + ', ' + 
+        JSON.stringify(username) + ', ' + JSON.stringify(port) + ', ' + lineNumber + 
+        ')" style="background: #17a2b8; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 10px;">Retry Connection</button></div>');
+    }
+  }, 100);
+}
+
+function retryRevocationConnection(keyId, displayHost, hostname, username, port, lineNumber) {
+  swal.close();
+  revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNumber);
+}
+
+function performFullRevocation(keyId, displayHost, hostname, username, port, lineNumber) {
+  updateStatus('Performing full SSH access revocation for ' + displayHost + '...');
+  
+  swal({
+    title: 'Revoking Access...',
+    text: 'Removing SSH key from remote server and local tracking...',
+    type: 'info',
+    showConfirmButton: false,
+    allowOutsideClick: false
+  });
+  
+  executeOperation('revoke_exchanged_key', {
+    line_number: lineNumber,
+    revoke_type: 'full',
+    host: hostname,
+    username: username,
+    port: port
+  }, function(response) {
+    if (response.toLowerCase().includes('successfully')) {
+      swal({
+        title: 'Access Revoked!',
+        text: 'SSH access has been successfully revoked for ' + displayHost + '. The remote server can no longer use passwordless SSH to connect.',
+        type: 'success',
+        confirmButtonText: 'Continue'
+      }, function() {
+        refreshExchangedKeys();
+        smartUpdateStatus(response);
+      });
+    } else {
+      swal({
+        title: 'Revocation Failed',
+        text: response,
+        type: 'error',
+        confirmButtonText: 'OK'
+      });
+    }
+  }, function() {
+    swal({
+      title: 'Error',
+      text: 'Failed to communicate with the server during revocation',
+      type: 'error',
+      confirmButtonText: 'OK'
+    });
+  });
+}
+
+function performLocalRevocation(keyId, displayHost, hostname, username, port, lineNumber) {
+  updateStatus('Removing ' + displayHost + ' from local tracking list...');
+  
+  swal({
+    title: 'Removing Locally...',
+    text: 'Removing connection from local tracking list...',
+    type: 'info',
+    showConfirmButton: false,
+    allowOutsideClick: false
+  });
+  
+  executeOperation('revoke_exchanged_key', {
+    line_number: lineNumber,
+    revoke_type: 'local_only'
+  }, function(response) {
+    if (response.toLowerCase().includes('successfully')) {
+      swal({
+        title: 'Removed Locally',
+        html: 'Connection removed from tracking list.<br><br><strong>Security Note:</strong> The remote server (' + displayHost + ') still has our public key. If the server comes back online, it could still connect to this server.<br><br>For complete security, remove the key from the remote server when it becomes accessible.',
+        type: 'warning',
+        confirmButtonText: 'Understood'
+      }, function() {
+        refreshExchangedKeys();
+        smartUpdateStatus(response);
+      });
+    } else {
+      swal({
+        title: 'Removal Failed',
+        text: response,
+        type: 'error',
+        confirmButtonText: 'OK'
+      });
+    }
+  }, function() {
+    swal({
+      title: 'Error',
+      text: 'Failed to communicate with the server',
+      type: 'error',
+      confirmButtonText: 'OK'
+    });
+  });
+}
 
 // Helper function for AJAX operations
 function executeOperation(operation, data, successCallback, errorCallback) {
