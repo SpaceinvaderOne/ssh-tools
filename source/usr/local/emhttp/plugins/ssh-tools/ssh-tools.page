@@ -289,8 +289,12 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
 
 
 <script>
+// Test function to verify JavaScript is loading
+console.log('SSH Tools JavaScript is loading...');
+
 // Make CSRF token available to JavaScript
 var csrf_token = <?=json_encode($csrf_token)?>;
+console.log('CSRF token loaded:', csrf_token ? 'present' : 'missing');
 
 // Password visibility toggle
 function togglePasswordVisibility() {
