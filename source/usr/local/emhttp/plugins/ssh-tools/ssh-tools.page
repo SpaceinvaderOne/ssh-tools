@@ -690,6 +690,12 @@ function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNu
 
 function showFullRevocationModal(keyId, displayHost, hostname, username, port, lineNumber) {
   console.log('showFullRevocationModal called with:', {keyId, displayHost, hostname, username, port, lineNumber});
+  
+  // Test with a simple alert first
+  alert('Modal test: Revoke SSH Access for ' + displayHost + '?');
+  
+  // Commented out for testing - if alert works, we'll fix SweetAlert
+  /*
   swal({
     title: 'Revoke SSH Access',
     html: 'This will remove SSH access for <strong>' + displayHost + '</strong>.<br><br>' +
@@ -709,6 +715,7 @@ function showFullRevocationModal(keyId, displayHost, hostname, username, port, l
       performFullRevocation(keyId, displayHost, hostname, username, port, lineNumber);
     }
   });
+  */
 }
 
 function showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber) {
