@@ -649,11 +649,12 @@ function performAuthorizedKeyDeletion(keyId, hostname, lineNumber) {
   });
 }
 
-// Exchanged Keys Revocation Functions - TEMPORARILY REMOVED FOR DEBUGGING
-// All revocation functions have been temporarily commented out to isolate JavaScript syntax error
-// Functions: revokeExchangedKey, showFullRevocationModal, showUnreachableServerModal, 
-// retryRevocationConnection, performFullRevocation, showPermissionRestrictedModal,
-// showKeyNotFoundModal, performLocalRevocation
+// Exchanged Keys Revocation Functions - ADDING BACK ONE BY ONE
+// Step 1: Add simple helper function first
+function retryRevocationConnection(keyId, displayHost, hostname, username, port, lineNumber) {
+  swal.close();
+  revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNumber);
+}
 
 // Helper function for AJAX operations
 function executeOperation(operation, data, successCallback, errorCallback) {
