@@ -618,7 +618,7 @@ rm -f "${AUTH_KEYS_FILE}.tmp_test" 2>/dev/null
 echo "Permission tests passed - proceeding with key removal"
 
 # Check if our key material is present before attempting removal
-if ! grep -q "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE"; then
+if ! grep -F -q "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE"; then
     echo "KEY_NOT_FOUND: Key material not found in authorized_keys"
     exit 3
 fi
@@ -652,7 +652,7 @@ echo "DEBUG: Temporary file creation test passed"
 
 # Try the actual grep operation with detailed error reporting
 echo "DEBUG: Running grep command to remove key material"
-if grep -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp" 2>&1; then
+if grep -F -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp" 2>&1; then
     echo "DEBUG: Grep command succeeded, checking results"
     
     # Verify the temporary file was created and has content
@@ -666,7 +666,7 @@ if grep -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp" 2>&1;
     echo "DEBUG: Temp file lines: $(wc -l < "${AUTH_KEYS_FILE}.tmp" 2>/dev/null || echo "unknown")"
     
     # Verify the key was actually removed
-    if grep -q "$OUR_KEY_MATERIAL" "${AUTH_KEYS_FILE}.tmp"; then
+    if grep -F -q "$OUR_KEY_MATERIAL" "${AUTH_KEYS_FILE}.tmp"; then
         echo "ERROR: Key still present after removal attempt"
         echo "DEBUG: Key material found in temp file - removal failed"
         rm -f "${AUTH_KEYS_FILE}.tmp" 2>/dev/null || true
