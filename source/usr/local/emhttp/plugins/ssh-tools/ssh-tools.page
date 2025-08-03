@@ -290,7 +290,7 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
 
 <script>
 // Make CSRF token available to JavaScript
-var csrf_token = '<?=$csrf_token?>';
+var csrf_token = <?=json_encode($csrf_token)?>;
 
 // Password visibility toggle
 function togglePasswordVisibility() {
@@ -732,7 +732,7 @@ function showRetryModal() {
   
   swal({
     title: 'Retry Connection?',
-    text: 'Would you like to test connectivity to ' + displayHost + ' again?<br><br>This is useful if you\'ve just turned the server back on.',
+    text: 'Would you like to test connectivity to ' + displayHost + ' again?<br><br>This is useful if you have just turned the server back on.',
     type: 'question',
     showCancelButton: true,
     confirmButtonText: 'Retry Connection',
