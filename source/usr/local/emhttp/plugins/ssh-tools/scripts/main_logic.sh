@@ -269,7 +269,7 @@ list_exchanged_keys() {
                     echo "    </div>"
                     echo "    <div style='display: flex; align-items: center; gap: 15px;'>"
                     echo "      <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
-                    echo "      <button onclick='revokeExchangedKey(\\\"$key_id\\\", \\\"$display_host\\\", \\\"$hostname\\\", \\\"$username\\\", \\\"$port\\\", $entry_count)' style='background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;' title='Revoke SSH access'>Revoke Access</button>"
+                    echo "      <!-- Revoke button temporarily removed for debugging -->"
                     echo "    </div>"
                     echo "  </div>"
                     echo "</div>"
