@@ -84,12 +84,28 @@ test_ssh_connection() {
     
     log_info "Testing SSH connection to ${username}@${host}:${port}..."
     
+    # First test basic connectivity to the port
+    if ! timeout 5 bash -c "</dev/tcp/${host}/${port}" 2>/dev/null; then
+        log_info "Cannot reach ${host}:${port} - port may be closed or host unreachable"
+        return 1
+    fi
+    
     # Use sshpass for password authentication (installed as dependency)
-    if sshpass -p "$password" ssh -p "$port" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=no "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
+    # Try with explicit port format and additional SSH options for non-standard ports
+    if sshpass -p "$password" ssh -p "$port" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=no -o UserKnownHostsFile=/dev/null "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
         log_info "Connection test to ${username}@${host}:${port} succeeded"
         return 0
     else
-        log_info "Connection test to ${username}@${host}:${port} failed - check credentials"
+        # Try alternative SSH syntax for troubleshooting
+        log_info "Primary connection failed, testing with verbose output..."
+        debug_log "Attempting connection with debug info..."
+        
+        # Capture error output for debugging
+        local ssh_error
+        ssh_error=$(sshpass -p "$password" ssh -v -p "$port" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=no -o UserKnownHostsFile=/dev/null "${username}@${host}" "echo 'test'" 2>&1 | head -10)
+        debug_log "SSH debug output: $ssh_error"
+        
+        log_info "Connection test to ${username}@${host}:${port} failed - check credentials and SSH service"
         return 1
     fi
 }
