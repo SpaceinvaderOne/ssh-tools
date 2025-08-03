@@ -671,31 +671,31 @@ function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNu
     console.log('Connection test response:', response);
     swal.close();
     
-    if (response.toLowerCase().includes('successful')) {
-      console.log('Server is reachable - showing full revocation modal');
-      // Server is reachable - show full revocation modal
-      showFullRevocationModal(keyId, displayHost, hostname, username, port, lineNumber);
-    } else {
-      console.log('Server is unreachable - showing unreachable modal');
-      // Server is unreachable - show local-only modal with educational info
-      showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
-    }
+    // Wait a moment for the modal to fully close before showing the next one
+    setTimeout(function() {
+      if (response.toLowerCase().includes('successful')) {
+        console.log('Server is reachable - showing full revocation modal');
+        // Server is reachable - show full revocation modal
+        showFullRevocationModal(keyId, displayHost, hostname, username, port, lineNumber);
+      } else {
+        console.log('Server is unreachable - showing unreachable modal');
+        // Server is unreachable - show local-only modal with educational info
+        showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
+      }
+    }, 300); // 300ms delay to ensure modal is fully closed
   }, function() {
     console.log('Connection test failed - showing unreachable modal');
     swal.close();
-    // Connection test failed - show unreachable modal
-    showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
+    // Wait a moment for the modal to fully close before showing the next one
+    setTimeout(function() {
+      showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber);
+    }, 300);
   });
 }
 
 function showFullRevocationModal(keyId, displayHost, hostname, username, port, lineNumber) {
   console.log('showFullRevocationModal called with:', {keyId, displayHost, hostname, username, port, lineNumber});
   
-  // Test with a simple alert first
-  alert('Modal test: Revoke SSH Access for ' + displayHost + '?');
-  
-  // Commented out for testing - if alert works, we'll fix SweetAlert
-  /*
   swal({
     title: 'Revoke SSH Access',
     html: 'This will remove SSH access for <strong>' + displayHost + '</strong>.<br><br>' +
@@ -715,7 +715,6 @@ function showFullRevocationModal(keyId, displayHost, hostname, username, port, l
       performFullRevocation(keyId, displayHost, hostname, username, port, lineNumber);
     }
   });
-  */
 }
 
 function showUnreachableServerModal(keyId, displayHost, hostname, username, port, lineNumber) {
