@@ -191,6 +191,7 @@ exchange_ssh_keys() {
 test_single_ssh_connection() {
     local host="$1"
     local port="${2:-22}"  # Default to port 22 if not specified
+    local username="${3:-${TEST_USERNAME:-root}}"  # Use provided username or default to root
     
     # Parse host:port format if provided as single parameter
     if [[ "$host" == *":"* ]]; then
@@ -203,12 +204,12 @@ test_single_ssh_connection() {
         display_host="${host}:${port}"
     fi
     
-    log_info "Testing SSH connection to $display_host..."
+    log_info "Testing SSH connection to ${username}@$display_host..."
     
-    if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 root@"$host" "echo 'SSH connection successful'" 2>/dev/null; then
-        log_info "SSH connection to $display_host successful (key-based authentication)"
+    if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" "echo 'SSH connection successful'" 2>/dev/null; then
+        log_info "SSH connection to ${username}@$display_host successful (key-based authentication)"
     else
-        log_info "SSH connection to $display_host failed (no key-based access)"
+        log_info "SSH connection to ${username}@$display_host failed (no key-based access)"
     fi
 }
 
@@ -763,7 +764,7 @@ process_operation() {
             if [[ -z "$TEST_HOST" ]]; then
                 error_exit "Missing host parameter for connection test"
             fi
-            test_single_ssh_connection "$TEST_HOST"
+            test_single_ssh_connection "$TEST_HOST" "" "$TEST_USERNAME"
             ;;
         "list_exchanged_keys")
             list_exchanged_keys

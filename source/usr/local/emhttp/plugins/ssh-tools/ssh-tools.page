@@ -668,9 +668,10 @@ function revokeExchangedKey(keyId, displayHost, hostname, username, port, lineNu
     allowOutsideClick: false
   });
   
-  // Test SSH connectivity first
+  // Test SSH connectivity first with the correct username
   executeOperation('test_single_connection', { 
-    host: hostname + ':' + port 
+    host: hostname + ':' + port,
+    username: username
   }, function(response) {
     console.log('Connection test response:', response);
     

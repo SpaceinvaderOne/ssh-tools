@@ -151,6 +151,18 @@ switch ($operation) {
             echo "Error: Host is required";
             exit;
         }
+        
+        if (isset($_POST['username'])) {
+            $validation = validateInput($_POST['username'], 'username');
+            if (isset($validation['error'])) {
+                echo "Error: " . $validation['error'];
+                exit;
+            }
+            $env['TEST_USERNAME'] = $validation['value'];
+        } else {
+            // Default to root if no username specified (backward compatibility)
+            $env['TEST_USERNAME'] = 'root';
+        }
         break;
         
     case 'scan_ssh':
