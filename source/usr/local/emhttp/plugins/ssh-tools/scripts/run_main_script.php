@@ -125,6 +125,18 @@ switch ($operation) {
             echo "Error: Password is required";
             exit;
         }
+        
+        if (isset($_POST['port'])) {
+            $port = intval($_POST['port']);
+            if ($port < 1 || $port > 65535) {
+                echo "Error: Port must be between 1 and 65535";
+                exit;
+            }
+            $env['REMOTE_PORT'] = $port;
+        } else {
+            // Default to port 22 if not specified
+            $env['REMOTE_PORT'] = 22;
+        }
         break;
         
     case 'test_single_connection':

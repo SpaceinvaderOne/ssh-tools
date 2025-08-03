@@ -158,6 +158,14 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
     </dl>
     
     <dl>
+      <dt>SSH Port</dt>
+      <dd>
+        <input type="number" id="remotePort" class="short" value="22" min="1" max="65535" placeholder="22">
+        <div class="description">SSH port (default: 22)</div>
+      </dd>
+    </dl>
+    
+    <dl>
       <dt>Password</dt>
       <dd>
         <input type="password" id="remotePassword" class="short" placeholder="Password for authentication" autocomplete="current-password">
@@ -358,12 +366,18 @@ function showConfirmModal(hostname) {
     hostname: hostname,
     host: document.getElementById('remoteHost').value,
     username: document.getElementById('remoteUsername').value,
-    password: document.getElementById('remotePassword').value
+    password: document.getElementById('remotePassword').value,
+    port: document.getElementById('remotePort').value
   };
+  
+  // Format display hostname with port if non-standard
+  const displayHost = modalActionData.port && modalActionData.port != 22 
+    ? `${hostname}:${modalActionData.port}` 
+    : hostname;
   
   swal({
     title: 'SSH Key Exchange',
-    text: `This will exchange SSH keys with ${hostname}. If keys already exist, they will be added to your tracking list. Continue?`,
+    text: `This will exchange SSH keys with ${displayHost}. If keys already exist, they will be added to your tracking list. Continue?`,
     type: 'warning',
     showCancelButton: true,
     confirmButtonText: 'Continue',
@@ -428,6 +442,7 @@ function testConnection() {
   const host = document.getElementById('remoteHost').value;
   const username = document.getElementById('remoteUsername').value;
   const password = document.getElementById('remotePassword').value;
+  const port = document.getElementById('remotePort').value;
   
   if (!host || !username || !password) {
     setStatus('Error: Please fill in all fields for connection testing', 'error');
@@ -435,12 +450,16 @@ function testConnection() {
   }
   
   setButtonLoading('testBtn', true);
-  updateStatus('Testing connection to ' + host + '...');
+  
+  // Format display hostname with port if non-standard
+  const displayHost = port && port != 22 ? `${host}:${port}` : host;
+  updateStatus('Testing connection to ' + displayHost + '...');
   
   const postData = {
     host: host,
     username: username,
-    password: password
+    password: password,
+    port: port
   };
   
   executeOperation('test_connection', postData, function(response) {
@@ -455,6 +474,7 @@ function exchangeSSHKeys() {
   const host = document.getElementById('remoteHost').value;
   const username = document.getElementById('remoteUsername').value;
   const password = document.getElementById('remotePassword').value;
+  const port = document.getElementById('remotePort').value;
   
   if (!host || !username || !password) {
     setStatus('Error: Please fill in all fields to exchange SSH keys', 'error');
@@ -469,11 +489,18 @@ function performSSHKeyExchange() {
   const postData = {
     host: modalActionData.host,
     username: modalActionData.username,
-    password: modalActionData.password
+    password: modalActionData.password,
+    port: modalActionData.port
   };
   
   setButtonLoading('exchangeBtn', true);
-  updateStatus(`Processing SSH keys for ${modalActionData.hostname}...`);
+  
+  // Format display hostname with port if non-standard
+  const displayHost = modalActionData.port && modalActionData.port != 22 
+    ? `${modalActionData.hostname}:${modalActionData.port}` 
+    : modalActionData.hostname;
+  
+  updateStatus(`Processing SSH keys for ${displayHost}...`);
   
   executeOperation('exchange_keys', postData, function(response) {
     setButtonLoading('exchangeBtn', false);
@@ -483,7 +510,7 @@ function performSSHKeyExchange() {
     if (response.toLowerCase().includes('successfully')) {
       swal({
         title: 'Success!',
-        text: `SSH keys have been successfully exchanged with ${modalActionData.hostname}`,
+        text: `SSH keys have been successfully exchanged with ${displayHost}`,
         type: 'success',
         confirmButtonText: 'View Exchanged Keys',
         closeOnConfirm: true

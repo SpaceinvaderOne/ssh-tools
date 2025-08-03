@@ -80,15 +80,16 @@ test_ssh_connection() {
     local host="$1"
     local username="$2"
     local password="$3"
+    local port="${4:-22}"  # Default to port 22 if not specified
     
-    log_info "Testing SSH connection to ${username}@${host}..."
+    log_info "Testing SSH connection to ${username}@${host}:${port}..."
     
     # Use sshpass for password authentication (installed as dependency)
-    if sshpass -p "$password" ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=no "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
-        log_info "Connection test to ${username}@${host} succeeded"
+    if sshpass -p "$password" ssh -p "$port" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=no "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
+        log_info "Connection test to ${username}@${host}:${port} succeeded"
         return 0
     else
-        log_info "Connection test to ${username}@${host} failed - check credentials"
+        log_info "Connection test to ${username}@${host}:${port} failed - check credentials"
         return 1
     fi
 }
@@ -98,20 +99,21 @@ exchange_ssh_keys() {
     local host="$1"
     local username="$2"
     local password="$3"
+    local port="${4:-22}"  # Default to port 22 if not specified
     
-    log_info "Starting SSH key exchange with ${username}@${host}..."
+    log_info "Starting SSH key exchange with ${username}@${host}:${port}..."
     
     # Ensure SSH key exists
     check_or_generate_ssh_key
     log_info "Using SSH key: $SSH_PUB_KEY_PATH"
     
     # Check if keys are already exchanged
-    if ssh -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
-        log_info "SSH keys already exchanged with ${username}@${host}"
+    if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+        log_info "SSH keys already exchanged with ${username}@${host}:${port}"
         log_info "Adding existing exchange to tracking list..."
         
-        # Record the existing exchange (rediscovery feature)
-        echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}" >> "$EXCHANGED_KEYS_FILE"
+        # Record the existing exchange (rediscovery feature) - always include port
+        echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}:${port}" >> "$EXCHANGED_KEYS_FILE"
         log_info "Exchange recorded to: $EXCHANGED_KEYS_FILE"
         log_info "File now contains: $(wc -l < "$EXCHANGED_KEYS_FILE") lines"
         
@@ -120,18 +122,18 @@ exchange_ssh_keys() {
     fi
     
     # Test connection first
-    if ! test_ssh_connection "$host" "$username" "$password"; then
-        error_exit "Cannot connect to ${username}@${host} with provided credentials"
+    if ! test_ssh_connection "$host" "$username" "$password" "$port"; then
+        error_exit "Cannot connect to ${username}@${host}:${port} with provided credentials"
     fi
     
     # Exchange keys using ssh-copy-id with sshpass (the proven Unraid method)
-    log_info "Exchanging SSH keys with ${username}@${host}..."
+    log_info "Exchanging SSH keys with ${username}@${host}:${port}..."
     
     # Use sshpass with ssh-copy-id (sshpass installed as plugin dependency)
-    if sshpass -p "$password" ssh-copy-id -f -o StrictHostKeyChecking=no -i "$SSH_PUB_KEY_PATH" "${username}@${host}" 2>&1; then
-        log_info "SSH key successfully copied to ${username}@${host}"
+    if sshpass -p "$password" ssh-copy-id -p "$port" -f -o StrictHostKeyChecking=no -i "$SSH_PUB_KEY_PATH" "${username}@${host}" 2>&1; then
+        log_info "SSH key successfully copied to ${username}@${host}:${port}"
     else
-        error_exit "Failed to copy SSH key to ${username}@${host}"
+        error_exit "Failed to copy SSH key to ${username}@${host}:${port}"
     fi
     
     # Update known_hosts to fix Unraid-specific issue
@@ -142,22 +144,24 @@ exchange_ssh_keys() {
         chmod 644 ~/.ssh/known_hosts 2>/dev/null || true
         # Remove any existing entries for this host to prevent duplicates
         ssh-keygen -R "$host" 2>/dev/null || true
+        # Also remove entries with port specification
+        ssh-keygen -R "[$host]:$port" 2>/dev/null || true
     fi
     
-    # Add the host key using ssh-keyscan (your proven method)
-    ssh-keyscan -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+    # Add the host key using ssh-keyscan with port (your proven method)
+    ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
     
     # Set proper permissions
     chmod 600 ~/.ssh/known_hosts 2>/dev/null || true
     
     # Verify the key exchange worked
     log_info "Verifying passwordless SSH connection..."
-    if ssh -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+    if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
         log_info "SSH key exchange completed successfully!"
         
-        # Record the successful exchange
+        # Record the successful exchange - always include port
         log_info "Recording successful exchange in tracking file..."
-        echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}" >> "$EXCHANGED_KEYS_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}:${port}" >> "$EXCHANGED_KEYS_FILE"
         log_info "Exchange recorded to: $EXCHANGED_KEYS_FILE"
         log_info "File now contains: $(wc -l < "$EXCHANGED_KEYS_FILE") lines"
         
@@ -170,13 +174,25 @@ exchange_ssh_keys() {
 # Test a single SSH connection (key-based)
 test_single_ssh_connection() {
     local host="$1"
+    local port="${2:-22}"  # Default to port 22 if not specified
     
-    log_info "Testing SSH connection to $host..."
+    # Parse host:port format if provided as single parameter
+    if [[ "$host" == *":"* ]]; then
+        port=$(echo "$host" | cut -d':' -f2)
+        host=$(echo "$host" | cut -d':' -f1)
+    fi
     
-    if ssh -o BatchMode=yes -o ConnectTimeout=5 root@"$host" "echo 'SSH connection successful'" 2>/dev/null; then
-        log_info "SSH connection to $host successful (key-based authentication)"
+    local display_host="$host"
+    if [[ "$port" != "22" ]]; then
+        display_host="${host}:${port}"
+    fi
+    
+    log_info "Testing SSH connection to $display_host..."
+    
+    if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 root@"$host" "echo 'SSH connection successful'" 2>/dev/null; then
+        log_info "SSH connection to $display_host successful (key-based authentication)"
     else
-        log_info "SSH connection to $host failed (no key-based access)"
+        log_info "SSH connection to $display_host failed (no key-based access)"
     fi
 }
 
@@ -194,11 +210,20 @@ list_exchanged_keys() {
             while IFS= read -r line; do
                 if [[ -n "$line" ]]; then
                     ((entry_count++))
-                    # Parse the line: "YYYY-MM-DD HH:MM:SS user@host"
+                    # Parse the line: "YYYY-MM-DD HH:MM:SS user@host:port"
                     timestamp=$(echo "$line" | awk '{print $1, $2}')
                     connection=$(echo "$line" | awk '{print $3}')
                     username=$(echo "$connection" | cut -d'@' -f1)
-                    hostname=$(echo "$connection" | cut -d'@' -f2)
+                    host_with_port=$(echo "$connection" | cut -d'@' -f2)
+                    
+                    # Split hostname and port (format: hostname:port or just hostname)
+                    if [[ "$host_with_port" == *":"* ]]; then
+                        hostname=$(echo "$host_with_port" | cut -d':' -f1)
+                        port=$(echo "$host_with_port" | cut -d':' -f2)
+                    else
+                        hostname="$host_with_port"
+                        port="22"
+                    fi
                     
                     # Debug removed - was corrupting HTML output
                     
@@ -210,10 +235,16 @@ list_exchanged_keys() {
                     #     status_text="✗ Inactive"
                     # fi
                     
+                    # Display hostname with port if non-standard
+                    display_host="$hostname"
+                    if [[ "$port" != "22" ]]; then
+                        display_host="${hostname}:${port}"
+                    fi
+                    
                     echo "<div style='margin-bottom: 10px; padding: 12px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;'>"
                     echo "  <div style='display: flex; justify-content: space-between; align-items: center;'>"
                     echo "    <div>"
-                    echo "      <strong style='color: #333;'>$hostname</strong>"
+                    echo "      <strong style='color: #333;'>$display_host</strong>"
                     echo "      <span style='color: #666; margin-left: 10px;'>User: $username</span>"
                     echo "      <div style='font-size: 11px; color: #888; margin-top: 2px;'>Exchanged: $timestamp</div>"
                     echo "    </div>"
@@ -251,18 +282,38 @@ test_all_connections() {
     
     while IFS= read -r line; do
         if [[ -n "$line" ]]; then
-            # Extract host from the line (format: "YYYY-MM-DD HH:MM:SS user@host")
+            # Extract connection info from the line (format: "YYYY-MM-DD HH:MM:SS user@host:port")
             local host_info=$(echo "$line" | awk '{print $3}')
-            local host=$(echo "$host_info" | cut -d'@' -f2)
             local username=$(echo "$host_info" | cut -d'@' -f1)
+            local host_with_port=$(echo "$host_info" | cut -d'@' -f2)
+            
+            # Split hostname and port (format: hostname:port or just hostname)
+            local host
+            local port
+            if [[ "$host_with_port" == *":"* ]]; then
+                host=$(echo "$host_with_port" | cut -d':' -f1)
+                port=$(echo "$host_with_port" | cut -d':' -f2)
+            else
+                host="$host_with_port"
+                port="22"
+            fi
             
             ((total_count++))
             
-            if ssh -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
-                log_info "✓ Connection to ${username}@${host} successful"
+            # Use port in SSH connection test
+            if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+                local display_host="$host"
+                if [[ "$port" != "22" ]]; then
+                    display_host="${host}:${port}"
+                fi
+                log_info "✓ Connection to ${username}@${display_host} successful"
                 ((success_count++))
             else
-                log_info "✗ Connection to ${username}@${host} failed"
+                local display_host="$host"
+                if [[ "$port" != "22" ]]; then
+                    display_host="${host}:${port}"
+                fi
+                log_info "✗ Connection to ${username}@${display_host} failed"
             fi
         fi
     done < "$EXCHANGED_KEYS_FILE"
@@ -273,15 +324,19 @@ test_all_connections() {
 # Scan network for SSH services
 scan_for_ssh() {
     local network="$1"
+    local ports="${2:-22}"  # Default to port 22, but allow comma-separated list
     
-    log_info "Scanning $network for SSH services..."
+    log_info "Scanning $network for SSH services on ports: $ports..."
     
     # Use nmap if available, otherwise use basic network scanning
     if command -v nmap >/dev/null 2>&1; then
-        nmap -p 22 --open "$network" 2>/dev/null | grep -E "(Nmap scan report|22/tcp)" | sed 's/Nmap scan report for //' | awk '/report/{host=$0} /22\/tcp/{print host " - SSH open"}'
+        nmap -p "$ports" --open "$network" 2>/dev/null | grep -E "(Nmap scan report|[0-9]+/tcp)" | sed 's/Nmap scan report for //' | awk '/report/{host=$0} /\/tcp/{port=$1; print host " - SSH open on port " port}'
     else
         # Basic ping sweep for the network (simplified)
         log_info "nmap not available, performing basic network scan..."
+        
+        # Convert comma-separated ports to array
+        IFS=',' read -ra PORT_ARRAY <<< "$ports"
         
         # Extract network base (assuming /24)
         local base=$(echo "$network" | cut -d'.' -f1-3)
@@ -290,10 +345,20 @@ scan_for_ssh() {
         
         for i in {1..254}; do
             local ip="${base}.${i}"
-            if timeout 2 bash -c "</dev/tcp/${ip}/22" 2>/dev/null; then
-                log_info "✓ SSH service found on $ip"
-                ((found++))
-            fi
+            
+            # Test each port
+            for port in "${PORT_ARRAY[@]}"; do
+                port=$(echo "$port" | tr -d ' ')  # Remove whitespace
+                if timeout 2 bash -c "</dev/tcp/${ip}/${port}" 2>/dev/null; then
+                    if [[ "$port" == "22" ]]; then
+                        log_info "✓ SSH service found on $ip (standard port)"
+                    else
+                        log_info "✓ SSH service found on $ip:$port (non-standard port)"
+                    fi
+                    ((found++))
+                fi
+            done
+            
             ((tested++))
             
             # Progress indicator every 50 hosts
@@ -476,13 +541,13 @@ process_operation() {
             if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USERNAME" ]] || [[ -z "$REMOTE_PASSWORD" ]]; then
                 error_exit "Missing required parameters for connection test"
             fi
-            test_ssh_connection "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PASSWORD"
+            test_ssh_connection "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PASSWORD" "$REMOTE_PORT"
             ;;
         "exchange_keys")
             if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USERNAME" ]] || [[ -z "$REMOTE_PASSWORD" ]]; then
                 error_exit "Missing required parameters for key exchange"
             fi
-            exchange_ssh_keys "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PASSWORD"
+            exchange_ssh_keys "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PASSWORD" "$REMOTE_PORT"
             ;;
         "test_single_connection")
             if [[ -z "$TEST_HOST" ]]; then
