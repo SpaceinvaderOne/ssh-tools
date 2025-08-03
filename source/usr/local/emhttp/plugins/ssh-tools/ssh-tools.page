@@ -785,7 +785,7 @@ function performFullRevocation(keyId, displayHost, hostname, username, port, lin
   
   swal({
     title: 'Revoking Access...',
-    text: 'Removing SSH key from remote server and local tracking...',
+    text: 'Testing permissions and removing SSH key from remote server...',
     type: 'info',
     showConfirmButton: false,
     allowOutsideClick: false
@@ -798,20 +798,31 @@ function performFullRevocation(keyId, displayHost, hostname, username, port, lin
     username: username,
     port: port
   }, function(response) {
+    console.log('Full revocation response:', response);
+    
     if (response.toLowerCase().includes('successfully')) {
       swal({
         title: 'Access Revoked!',
-        text: 'SSH access has been successfully revoked for ' + displayHost + '. The remote server can no longer use passwordless SSH to connect.',
+        html: 'SSH access has been successfully revoked for <strong>' + displayHost + '</strong>.<br><br>' +
+              '✓ Key removed from remote server<br>' +
+              '✓ Removed from local tracking<br>' +
+              '✓ File permissions secured<br><br>' +
+              'The remote server can no longer use passwordless SSH to connect.',
         type: 'success',
         confirmButtonText: 'Continue'
       }, function() {
         refreshExchangedKeys();
         smartUpdateStatus(response);
       });
+    } else if (response.includes('PERMISSION_ERROR:')) {
+      showPermissionRestrictedModal(keyId, displayHost, hostname, username, port, lineNumber, response);
+    } else if (response.includes('KEY_NOT_FOUND:')) {
+      showKeyNotFoundModal(keyId, displayHost, hostname, username, port, lineNumber, response);
     } else {
       swal({
         title: 'Revocation Failed',
-        text: response,
+        html: 'Failed to revoke SSH access for <strong>' + displayHost + '</strong>.<br><br>' +
+              'Error details:<br>' + response.replace(/\n/g, '<br>'),
         type: 'error',
         confirmButtonText: 'OK'
       });
@@ -823,6 +834,44 @@ function performFullRevocation(keyId, displayHost, hostname, username, port, lin
       type: 'error',
       confirmButtonText: 'OK'
     });
+  });
+}
+
+function showPermissionRestrictedModal(keyId, displayHost, hostname, username, port, lineNumber, errorDetails) {
+  swal({
+    title: 'Permission Restricted',
+    html: 'Cannot remove SSH key from <strong>' + displayHost + '</strong> due to file permissions.<br><br>' +
+          '<strong>Details:</strong> The user account does not have write access to the SSH configuration files on the remote server.<br><br>' +
+          '<strong>Options:</strong><br><br>' +
+          '<strong>Remove Locally Only:</strong> Remove from our tracking list only. The remote server will still have our public key.<br><br>' +
+          '<strong>Manual Removal:</strong> Contact the system administrator to remove the key manually.',
+    type: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Remove Locally Only',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: '#ffc107',
+    html: true
+  }, function(isConfirm) {
+    if (isConfirm) {
+      performLocalRevocation(keyId, displayHost, hostname, username, port, lineNumber);
+    }
+  });
+}
+
+function showKeyNotFoundModal(keyId, displayHost, hostname, username, port, lineNumber, errorDetails) {
+  swal({
+    title: 'Key Not Found',
+    html: 'SSH key not found in <strong>' + displayHost + '</strong> authorized_keys file.<br><br>' +
+          'This may indicate:<br>' +
+          '• Key was already manually removed<br>' +
+          '• Key format differs from expected<br>' +
+          '• File was modified by another process<br><br>' +
+          'The key will be removed from our local tracking list.',
+    type: 'info',
+    confirmButtonText: 'Remove from Tracking',
+    html: true
+  }, function() {
+    performLocalRevocation(keyId, displayHost, hostname, username, port, lineNumber);
   });
 }
 

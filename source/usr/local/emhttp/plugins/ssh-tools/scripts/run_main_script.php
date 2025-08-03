@@ -281,7 +281,18 @@ if (is_resource($process)) {
     if ($exitCode === 0) {
         echo $output;
     } else {
-        echo "Error: Script execution failed (exit code: $exitCode)" . ($error ? "\nError output: " . $error : "") . ($output ? "\nStdout: " . $output : "");
+        // Enhanced error handling for revocation operations
+        $fullOutput = $output . ($error ? "\n" . $error : "");
+        
+        // Check for specific error types in the output
+        if (strpos($fullOutput, 'PERMISSION_ERROR:') !== false) {
+            echo "PERMISSION_ERROR: " . $fullOutput;
+        } elseif (strpos($fullOutput, 'KEY_NOT_FOUND:') !== false) {
+            echo "KEY_NOT_FOUND: " . $fullOutput;
+        } else {
+            // Standard error format for backward compatibility
+            echo "Error: Script execution failed (exit code: $exitCode)" . ($error ? "\nError output: " . $error : "") . ($output ? "\nStdout: " . $output : "");
+        }
     }
 } else {
     echo "Error: Failed to start script process";

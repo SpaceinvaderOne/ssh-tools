@@ -560,11 +560,12 @@ revoke_ssh_access_full() {
     
     log_info "Starting full SSH access revocation for ${username}@${host}:${port}..."
     
-    # Get our public key content to identify it on the remote server
-    local our_public_key
+    # Get our public key's base64 material for reliable matching
+    local our_key_material
     if [[ -f "$SSH_PUB_KEY_PATH" ]]; then
-        our_public_key=$(cat "$SSH_PUB_KEY_PATH" | awk '{print $2}')
+        our_key_material=$(cat "$SSH_PUB_KEY_PATH" | awk '{print $2}')
         log_info "Using public key: $SSH_PUB_KEY_PATH"
+        log_info "Key material: ${our_key_material:0:20}...${our_key_material: -20}"
     else
         error_exit "Local public key not found at $SSH_PUB_KEY_PATH"
     fi
@@ -576,55 +577,116 @@ revoke_ssh_access_full() {
     
     log_info "Connected successfully, removing public key from remote authorized_keys..."
     
-    # Create a temporary script to run on the remote server
+    # Create enhanced remote script with permission testing and base64 matching
     local remote_script=$(cat << 'EOF'
-# Remote script to remove our public key
+# Enhanced remote script for safe SSH key removal
 AUTH_KEYS_FILE="$HOME/.ssh/authorized_keys"
-OUR_KEY_PART="$1"
+OUR_KEY_MATERIAL="$1"
 
+# Exit codes: 1=general error, 2=permission error, 3=key not found
+
+# Check if authorized_keys file exists
 if [[ ! -f "$AUTH_KEYS_FILE" ]]; then
-    echo "No authorized_keys file found on remote server"
-    exit 1
+    echo "PERMISSION_ERROR: No authorized_keys file found"
+    exit 2
 fi
 
-# Create backup
-cp "$AUTH_KEYS_FILE" "${AUTH_KEYS_FILE}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+# Comprehensive permission testing before any operations
+echo "Testing file permissions..."
 
-# Remove lines containing our key
-if grep -v "$OUR_KEY_PART" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp"; then
-    # Check if anything was actually removed
-    local original_lines=$(wc -l < "$AUTH_KEYS_FILE")
-    local new_lines=$(wc -l < "${AUTH_KEYS_FILE}.tmp")
+# Test 1: Check if authorized_keys is writable
+if [[ ! -w "$AUTH_KEYS_FILE" ]]; then
+    echo "PERMISSION_ERROR: Cannot write to authorized_keys file"
+    exit 2
+fi
+
+# Test 2: Check if .ssh directory is writable (for temp files)
+if ! touch "$HOME/.ssh/.write_test" 2>/dev/null; then
+    echo "PERMISSION_ERROR: Cannot write to .ssh directory"
+    exit 2
+fi
+rm -f "$HOME/.ssh/.write_test" 2>/dev/null
+
+# Test 3: Test atomic operation capability
+if ! touch "${AUTH_KEYS_FILE}.tmp_test" 2>/dev/null; then
+    echo "PERMISSION_ERROR: Cannot create temporary files for atomic operations"
+    exit 2
+fi
+rm -f "${AUTH_KEYS_FILE}.tmp_test" 2>/dev/null
+
+echo "Permission tests passed - proceeding with key removal"
+
+# Check if our key material is present before attempting removal
+if ! grep -q "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE"; then
+    echo "KEY_NOT_FOUND: Key material not found in authorized_keys"
+    exit 3
+fi
+
+echo "Key found - creating backup and removing key"
+
+# Create timestamped backup
+if ! cp "$AUTH_KEYS_FILE" "${AUTH_KEYS_FILE}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null; then
+    echo "PERMISSION_ERROR: Cannot create backup file"
+    exit 2
+fi
+
+# Atomic removal: write to temp file first, then move
+if grep -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp"; then
+    # Verify the key was actually removed
+    if grep -q "$OUR_KEY_MATERIAL" "${AUTH_KEYS_FILE}.tmp"; then
+        rm -f "${AUTH_KEYS_FILE}.tmp" 2>/dev/null || true
+        echo "ERROR: Key still present after removal attempt"
+        exit 1
+    fi
     
-    if [[ $original_lines -gt $new_lines ]]; then
-        mv "${AUTH_KEYS_FILE}.tmp" "$AUTH_KEYS_FILE"
+    # Atomic move and set permissions
+    if mv "${AUTH_KEYS_FILE}.tmp" "$AUTH_KEYS_FILE"; then
         chmod 600 "$AUTH_KEYS_FILE" 2>/dev/null || true
+        chmod 700 "$HOME/.ssh" 2>/dev/null || true
         echo "Successfully removed SSH key from authorized_keys"
-        echo "Removed $((original_lines - new_lines)) key(s)"
+        echo "Key removal verified and file permissions secured"
     else
         rm -f "${AUTH_KEYS_FILE}.tmp" 2>/dev/null || true
-        echo "Key not found in authorized_keys file"
+        echo "ERROR: Failed to replace authorized_keys file"
         exit 1
     fi
 else
-    echo "Failed to process authorized_keys file"
+    echo "ERROR: Failed to create temporary file for key removal"
     exit 1
 fi
 EOF
 )
     
-    # Execute the remote script
-    if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=10 "${username}@${host}" "bash -s '$our_public_key'" <<< "$remote_script" 2>/dev/null; then
-        log_info "Successfully removed public key from remote server"
-        
-        # Remove from local tracking file
-        revoke_ssh_access_local "$line_number"
-        
-        log_info "Full SSH access revocation completed successfully"
-        return 0
-    else
-        error_exit "Failed to remove public key from remote server"
-    fi
+    # Execute the enhanced remote script with proper error handling
+    local ssh_output
+    local ssh_exit_code
+    
+    ssh_output=$(ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=10 "${username}@${host}" "bash -s '$our_key_material'" <<< "$remote_script" 2>&1)
+    ssh_exit_code=$?
+    
+    log_info "Remote script output: $ssh_output"
+    
+    case $ssh_exit_code in
+        0)
+            log_info "Successfully removed public key from remote server"
+            # Remove from local tracking file
+            revoke_ssh_access_local "$line_number"
+            log_info "Full SSH access revocation completed successfully"
+            return 0
+            ;;
+        2)
+            log_info "Permission error on remote server: $ssh_output"
+            error_exit "PERMISSION_ERROR: $ssh_output"
+            ;;
+        3)
+            log_info "Key not found on remote server: $ssh_output"
+            error_exit "KEY_NOT_FOUND: $ssh_output"
+            ;;
+        *)
+            log_info "Remote script failed with exit code $ssh_exit_code: $ssh_output"
+            error_exit "Failed to remove public key from remote server: $ssh_output"
+            ;;
+    esac
 }
 
 # Remove SSH connection from local tracking only
