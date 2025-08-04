@@ -85,6 +85,49 @@ resolve_hostname() {
     echo "$resolved_name"
 }
 
+# Get source hostname (this Unraid server)
+get_source_hostname() {
+    local source_hostname=""
+    
+    # Try multiple methods to get hostname
+    if command -v hostname >/dev/null 2>&1; then
+        source_hostname=$(hostname 2>/dev/null || true)
+    fi
+    
+    # Fallback to /etc/hostname
+    if [[ -z "$source_hostname" ]] && [[ -f /etc/hostname ]]; then
+        source_hostname=$(cat /etc/hostname 2>/dev/null | tr -d '\n' || true)
+    fi
+    
+    # Final fallback
+    if [[ -z "$source_hostname" ]]; then
+        source_hostname="UnraidServer"
+    fi
+    
+    echo "$source_hostname"
+}
+
+# Strip domain suffixes to make hostnames shorter
+strip_domain_suffixes() {
+    local hostname="$1"
+    
+    # Remove common local domain suffixes
+    hostname=${hostname%.local}
+    hostname=${hostname%.localdomain}
+    hostname=${hostname%.lan}
+    hostname=${hostname%.home}
+    
+    echo "$hostname"
+}
+
+# Sanitize hostname for SSH key comments (no spaces, special chars)
+sanitize_for_comment() {
+    local name="$1"
+    
+    # Convert to lowercase and replace invalid chars with dashes
+    echo "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g'
+}
+
 # Create safe filename from hostname or IP
 create_safe_identifier() {
     local host="$1"
@@ -157,16 +200,25 @@ generate_connection_key() {
     local public_key="${private_key}.pub"
     
     if [[ ! -f "$private_key" ]]; then
-        # Enhanced comment with hostname resolution
-        local hostname=$(resolve_hostname "$host")
-        local comment_host="$host"
-        if [[ -n "$hostname" ]] && [[ "$hostname" != "$host" ]]; then
-            comment_host="${hostname}(${host})"
+        # Create source-focused SSH key comment
+        local source_hostname=$(get_source_hostname)
+        local source_short=$(strip_domain_suffixes "$source_hostname")
+        local source_clean=$(sanitize_for_comment "$source_short")
+        
+        # Get target hostname (short version)
+        local target_hostname=$(resolve_hostname "$host")
+        local target_short=""
+        if [[ -n "$target_hostname" ]]; then
+            target_short=$(strip_domain_suffixes "$target_hostname")
+            target_short=$(sanitize_for_comment "$target_short")
+        else
+            # Use IP with dashes if no hostname available
+            target_short=$(echo "$host" | sed 's/\./-/g')
         fi
         
-        # Generate key silently (no output that corrupts return value)
+        # Generate key with source-focused comment
         ssh-keygen -t "$SSH_KEY_TYPE" -f "$private_key" -N "" \
-            -C "PAIR-${username}@${comment_host}:${port}-created:$(date +%Y%m%d%H%M%S)" >/dev/null 2>&1
+            -C "PAIR-from-${source_clean}-to-${username}@${target_short}:${port}-$(date +%Y%m%d%H%M%S)" >/dev/null 2>&1
         
         # Set proper permissions
         chmod 600 "$private_key" 2>/dev/null || true
