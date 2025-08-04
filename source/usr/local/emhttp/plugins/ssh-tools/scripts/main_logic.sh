@@ -7,10 +7,10 @@
 
 # Constants
 SSH_KEY_TYPE="ed25519"
-SSH_KEY_PATH="/root/.ssh/id_${SSH_KEY_TYPE}"
-SSH_PUB_KEY_PATH="${SSH_KEY_PATH}.pub"
+GLOBAL_SSH_KEY_PATH="/root/.ssh/id_${SSH_KEY_TYPE}"  # Keep for system compatibility
+GLOBAL_SSH_PUB_KEY_PATH="${GLOBAL_SSH_KEY_PATH}.pub"
 PLUGIN_DATA_DIR="/boot/config/plugins/ssh-tools"
-EXCHANGED_KEYS_FILE="${PLUGIN_DATA_DIR}/exchanged_keys.txt"
+CONNECTIONS_REGISTRY="/root/.ssh/ssh-tools-connections.json"
 
 # Helper functions
 error_exit() {
@@ -26,6 +26,22 @@ log_info() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
+# Initialize connections registry with clean JSON structure
+initialize_connections_registry() {
+    if [[ ! -f "$CONNECTIONS_REGISTRY" ]]; then
+        cat > "$CONNECTIONS_REGISTRY" << EOF
+{
+  "version": "2.0",
+  "created": "$(date -Iseconds)",
+  "last_updated": "$(date -Iseconds)",
+  "connections": []
+}
+EOF
+        chmod 644 "$CONNECTIONS_REGISTRY" 2>/dev/null || true
+        debug_log "Created connections registry: $CONNECTIONS_REGISTRY"
+    fi
+}
+
 # Ensure plugin data directory exists
 ensure_data_dir() {
     if [[ ! -d "$PLUGIN_DATA_DIR" ]]; then
@@ -33,14 +49,8 @@ ensure_data_dir() {
         debug_log "Created plugin data directory: $PLUGIN_DATA_DIR"
     fi
     
-    # Ensure exchanged keys file exists
-    if [[ ! -f "$EXCHANGED_KEYS_FILE" ]]; then
-        touch "$EXCHANGED_KEYS_FILE"
-        debug_log "Created exchanged keys tracking file: $EXCHANGED_KEYS_FILE"
-    fi
-    
-    # Set proper permissions
-    chmod 644 "$EXCHANGED_KEYS_FILE" 2>/dev/null || true
+    # Initialize JSON connections registry
+    initialize_connections_registry
 }
 
 # Validate environment
@@ -53,25 +63,136 @@ validate_environment() {
     ensure_data_dir
 }
 
-# Check if SSH key exists and generate if needed
-check_or_generate_ssh_key() {
-    if [[ ! -f "$SSH_KEY_PATH" ]]; then
-        log_info "Generating new ${SSH_KEY_TYPE} SSH key..."
-        ssh-keygen -t "$SSH_KEY_TYPE" -f "$SSH_KEY_PATH" -N "" -C "unraid-ssh-tools-$(hostname)"
-        log_info "SSH key generated successfully"
+# Generate individual SSH key for a specific connection
+generate_connection_key() {
+    local conn_id="$1"
+    local host="$2"
+    local username="$3"
+    local port="$4"
+    
+    local private_key="/root/.ssh/ssh-tools-${conn_id}_ed25519"
+    local public_key="${private_key}.pub"
+    
+    if [[ ! -f "$private_key" ]]; then
+        log_info "Generating individual SSH key for connection ${conn_id}..."
+        ssh-keygen -t "$SSH_KEY_TYPE" -f "$private_key" -N "" \
+            -C "ssh-tools-${username}@${host}:${port}-$(date +%Y%m%d)"
+        
+        # Set proper permissions
+        chmod 600 "$private_key" 2>/dev/null || true
+        chmod 644 "$public_key" 2>/dev/null || true
+        
+        log_info "Individual SSH key generated: $private_key"
         return 0
     else
-        debug_log "SSH key already exists at $SSH_KEY_PATH"
-        return 0  # Return success - existing key is fine
+        debug_log "SSH key already exists: $private_key"
+        return 0
     fi
 }
 
-# Get SSH key status information (user-friendly)
-get_key_status() {
-    if [[ -f "$SSH_KEY_PATH" ]] && [[ -f "$SSH_PUB_KEY_PATH" ]]; then
-        echo "✓ SSH key ready for exchanges"
+# Generate unique connection ID
+generate_connection_id() {
+    echo "conn-$(date +%Y%m%d%H%M%S)-$$"
+}
+
+# Add connection to JSON registry
+add_connection_to_registry() {
+    local conn_id="$1"
+    local host="$2"
+    local username="$3"
+    local port="$4"
+    local private_key="/root/.ssh/ssh-tools-${conn_id}_ed25519"
+    local public_key="${private_key}.pub"
+    local timestamp="$(date -Iseconds)"
+    
+    # Check if jq is available
+    if ! command -v jq >/dev/null 2>&1; then
+        error_exit "jq is required but not installed"
+    fi
+    
+    # Create temporary file for atomic update
+    local temp_file="/tmp/connections_update.json"
+    
+    # Add new connection to registry
+    jq --arg id "$conn_id" \
+       --arg host "$host" \
+       --arg username "$username" \
+       --arg port "$port" \
+       --arg private_key "$private_key" \
+       --arg public_key "$public_key" \
+       --arg created "$timestamp" \
+       --arg last_updated "$timestamp" \
+       '.last_updated = $last_updated | .connections += [{
+         "id": $id,
+         "host": $host,
+         "username": $username,
+         "port": ($port | tonumber),
+         "private_key": $private_key,
+         "public_key": $public_key,
+         "created": $created,
+         "last_tested": null,
+         "last_successful": null,
+         "status": "active"
+       }]' "$CONNECTIONS_REGISTRY" > "$temp_file"
+    
+    if [[ $? -eq 0 ]]; then
+        mv "$temp_file" "$CONNECTIONS_REGISTRY"
+        chmod 644 "$CONNECTIONS_REGISTRY" 2>/dev/null || true
+        debug_log "Added connection $conn_id to registry"
+        return 0
     else
-        echo "⚠ No SSH key found - will generate automatically"
+        rm -f "$temp_file" 2>/dev/null || true
+        error_exit "Failed to update connections registry"
+    fi
+}
+
+# Update connection test result in JSON registry
+update_connection_test_result() {
+    local conn_id="$1"
+    local result="$2"  # "success" or "failed"
+    local timestamp="$(date -Iseconds)"
+    
+    if ! command -v jq >/dev/null 2>&1; then
+        debug_log "jq not available - skipping test result update"
+        return 0
+    fi
+    
+    local temp_file="/tmp/connections_test_update.json"
+    
+    if [[ "$result" == "success" ]]; then
+        # Update both last_tested and last_successful
+        jq --arg id "$conn_id" \
+           --arg timestamp "$timestamp" \
+           '.last_updated = $timestamp | 
+            (.connections[] | select(.id == $id)) |= 
+            (.last_tested = $timestamp | .last_successful = $timestamp | .status = "active")' \
+           "$CONNECTIONS_REGISTRY" > "$temp_file"
+    else
+        # Update only last_tested
+        jq --arg id "$conn_id" \
+           --arg timestamp "$timestamp" \
+           '.last_updated = $timestamp | 
+            (.connections[] | select(.id == $id)) |= 
+            (.last_tested = $timestamp | .status = "inactive")' \
+           "$CONNECTIONS_REGISTRY" > "$temp_file"
+    fi
+    
+    if [[ $? -eq 0 ]]; then
+        mv "$temp_file" "$CONNECTIONS_REGISTRY"
+        chmod 644 "$CONNECTIONS_REGISTRY" 2>/dev/null || true
+        debug_log "Updated test result for connection $conn_id: $result"
+    else
+        rm -f "$temp_file" 2>/dev/null || true
+        debug_log "Failed to update test result for connection $conn_id"
+    fi
+}
+
+# Get SSH key status information (system global key for display)
+get_key_status() {
+    if [[ -f "$GLOBAL_SSH_KEY_PATH" ]] && [[ -f "$GLOBAL_SSH_PUB_KEY_PATH" ]]; then
+        echo "✓ System SSH key available - individual keys generated per connection"
+    else
+        echo "ℹ Individual SSH keys will be generated automatically for each connection"
     fi
 }
 
@@ -110,7 +231,7 @@ test_ssh_connection() {
     fi
 }
 
-# Exchange SSH keys with remote host
+# Exchange SSH keys with remote host using individual key pairs
 exchange_ssh_keys() {
     local host="$1"
     local username="$2"
@@ -119,36 +240,34 @@ exchange_ssh_keys() {
     
     log_info "Starting SSH key exchange with ${username}@${host}:${port}..."
     
-    # Ensure SSH key exists
-    check_or_generate_ssh_key
-    log_info "Using SSH key: $SSH_PUB_KEY_PATH"
+    # Generate unique connection ID
+    local conn_id=$(generate_connection_id)
+    log_info "Generated connection ID: $conn_id"
     
-    # Check if keys are already exchanged
-    if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
-        log_info "SSH keys already exchanged with ${username}@${host}:${port}"
-        log_info "Adding existing exchange to tracking list..."
-        
-        # Record the existing exchange (rediscovery feature) - always include port
-        echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}:${port}" >> "$EXCHANGED_KEYS_FILE"
-        log_info "Exchange recorded to: $EXCHANGED_KEYS_FILE"
-        log_info "File now contains: $(wc -l < "$EXCHANGED_KEYS_FILE") lines"
-        
-        log_info "Existing SSH key exchange added to tracking list successfully!"
-        return 0
-    fi
+    # Generate individual SSH key for this connection
+    generate_connection_key "$conn_id" "$host" "$username" "$port"
     
-    # Test connection first
+    local private_key="/root/.ssh/ssh-tools-${conn_id}_ed25519"
+    local public_key="${private_key}.pub"
+    
+    log_info "Using individual SSH key: $public_key"
+    
+    # Test connection first with password
     if ! test_ssh_connection "$host" "$username" "$password" "$port"; then
+        # Clean up generated key on connection failure
+        rm -f "$private_key" "$public_key" 2>/dev/null || true
         error_exit "Cannot connect to ${username}@${host}:${port} with provided credentials"
     fi
     
     # Exchange keys using ssh-copy-id with sshpass (the proven Unraid method)
-    log_info "Exchanging SSH keys with ${username}@${host}:${port}..."
+    log_info "Exchanging individual SSH key with ${username}@${host}:${port}..."
     
     # Use sshpass with ssh-copy-id (sshpass installed as plugin dependency)
-    if sshpass -p "$password" ssh-copy-id -p "$port" -f -o StrictHostKeyChecking=no -i "$SSH_PUB_KEY_PATH" "${username}@${host}" 2>&1; then
-        log_info "SSH key successfully copied to ${username}@${host}:${port}"
+    if sshpass -p "$password" ssh-copy-id -p "$port" -f -o StrictHostKeyChecking=no -i "$public_key" "${username}@${host}" 2>&1; then
+        log_info "Individual SSH key successfully copied to ${username}@${host}:${port}"
     else
+        # Clean up generated key on exchange failure
+        rm -f "$private_key" "$public_key" 2>/dev/null || true
         error_exit "Failed to copy SSH key to ${username}@${host}:${port}"
     fi
     
@@ -170,24 +289,27 @@ exchange_ssh_keys() {
     # Set proper permissions
     chmod 600 ~/.ssh/known_hosts 2>/dev/null || true
     
-    # Verify the key exchange worked
-    log_info "Verifying passwordless SSH connection..."
-    if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+    # Verify the key exchange worked using individual key
+    log_info "Verifying passwordless SSH connection with individual key..."
+    if ssh -i "$private_key" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
         log_info "SSH key exchange completed successfully!"
         
-        # Record the successful exchange - always include port
-        log_info "Recording successful exchange in tracking file..."
-        echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}:${port}" >> "$EXCHANGED_KEYS_FILE"
-        log_info "Exchange recorded to: $EXCHANGED_KEYS_FILE"
-        log_info "File now contains: $(wc -l < "$EXCHANGED_KEYS_FILE") lines"
+        # Add connection to JSON registry
+        add_connection_to_registry "$conn_id" "$host" "$username" "$port"
         
+        # Update test result as successful
+        update_connection_test_result "$conn_id" "success"
+        
+        log_info "Connection recorded in registry with ID: $conn_id"
         return 0
     else
-        error_exit "SSH key exchange failed - cannot connect without password"
+        # Clean up generated key on verification failure
+        rm -f "$private_key" "$public_key" 2>/dev/null || true
+        error_exit "SSH key exchange failed - cannot connect without password using individual key"
     fi
 }
 
-# Test a single SSH connection (key-based)
+# Test a single SSH connection (for specific connections or general testing)
 test_single_ssh_connection() {
     local host="$1"
     local port="${2:-22}"  # Default to port 22 if not specified
@@ -206,142 +328,217 @@ test_single_ssh_connection() {
     
     log_info "Testing SSH connection to ${username}@$display_host..."
     
-    if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" "echo 'SSH connection successful'" 2>/dev/null; then
-        log_info "SSH connection to ${username}@$display_host successful (key-based authentication)"
-    else
-        log_info "SSH connection to ${username}@$display_host failed (no key-based access)"
+    # First check if this is a tracked connection with individual key
+    local found_connection=""
+    if [[ -f "$CONNECTIONS_REGISTRY" ]] && command -v jq >/dev/null 2>&1; then
+        found_connection=$(jq -r --arg host "$host" --arg username "$username" --arg port "$port" \
+            '.connections[] | select(.host == $host and .username == $username and (.port | tostring) == $port) | .private_key' \
+            "$CONNECTIONS_REGISTRY" 2>/dev/null)
     fi
-}
-
-# List exchanged SSH keys
-list_exchanged_keys() {
-    if [[ -f "$EXCHANGED_KEYS_FILE" ]]; then
-        echo "<h4>Successfully Exchanged Keys:</h4>"
-        
-        # Debug removed - was corrupting HTML output
-        
-        if [[ -s "$EXCHANGED_KEYS_FILE" ]]; then
-            echo "<div style='margin-bottom: 15px;'>"
+    
+    # Test with individual key if available
+    if [[ -n "$found_connection" ]] && [[ "$found_connection" != "null" ]] && [[ -f "$found_connection" ]]; then
+        if ssh -i "$found_connection" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" "echo 'SSH connection successful'" 2>/dev/null; then
+            log_info "SSH connection to ${username}@$display_host successful (using individual key)"
             
-            entry_count=0
-            while IFS= read -r line; do
-                if [[ -n "$line" ]]; then
-                    ((entry_count++))
-                    # Parse the line: "YYYY-MM-DD HH:MM:SS user@host:port"
-                    timestamp=$(echo "$line" | awk '{print $1, $2}')
-                    connection=$(echo "$line" | awk '{print $3}')
-                    username=$(echo "$connection" | cut -d'@' -f1)
-                    host_with_port=$(echo "$connection" | cut -d'@' -f2)
-                    
-                    # Split hostname and port (format: hostname:port or just hostname)
-                    if [[ "$host_with_port" == *":"* ]]; then
-                        hostname=$(echo "$host_with_port" | cut -d':' -f1)
-                        port=$(echo "$host_with_port" | cut -d':' -f2)
-                    else
-                        hostname="$host_with_port"
-                        port="22"
-                    fi
-                    
-                    # Debug removed - was corrupting HTML output
-                    
-                    # Test if connection is still active (temporarily disabled for debugging)
-                    status_color="#28a745"
-                    status_text="✓ Active"
-                    # if ! ssh -o BatchMode=yes -o ConnectTimeout=3 "${connection}" true 2>/dev/null; then
-                    #     status_color="#dc3545"
-                    #     status_text="✗ Inactive"
-                    # fi
-                    
-                    # Display hostname with port if non-standard
-                    display_host="$hostname"
-                    if [[ "$port" != "22" ]]; then
-                        display_host="${hostname}:${port}"
-                    fi
-                    
-                    # Generate unique ID for this exchanged key (using entry count)
-                    local key_id="exchanged_key_${entry_count}"
-                    
-                    echo "<div style='margin-bottom: 10px; padding: 12px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;'>"
-                    echo "  <div style='display: flex; justify-content: space-between; align-items: center;'>"
-                    echo "    <div>"
-                    echo "      <strong style='color: #333;'>$display_host</strong>"
-                    echo "      <span style='color: #666; margin-left: 10px;'>User: $username</span>"
-                    echo "      <div style='font-size: 11px; color: #888; margin-top: 2px;'>Exchanged: $timestamp</div>"
-                    echo "    </div>"
-                    echo "    <div style='display: flex; align-items: center; gap: 15px;'>"
-                    echo "      <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
-                    echo "      <button onclick=\"revokeExchangedKey('$key_id', '$display_host', '$hostname', '$username', '$port', $entry_count)\" style='background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;' title='Revoke SSH access'>Revoke Access</button>"
-                    echo "    </div>"
-                    echo "  </div>"
-                    echo "</div>"
-                fi
-            done < "$EXCHANGED_KEYS_FILE"
-            
-            # Debug removed - was corrupting HTML output
-            echo "</div>"
+            # Update connection status in registry
+            local conn_id=$(jq -r --arg host "$host" --arg username "$username" --arg port "$port" \
+                '.connections[] | select(.host == $host and .username == $username and (.port | tostring) == $port) | .id' \
+                "$CONNECTIONS_REGISTRY" 2>/dev/null)
+            if [[ -n "$conn_id" ]] && [[ "$conn_id" != "null" ]]; then
+                update_connection_test_result "$conn_id" "success"
+            fi
+            return 0
         else
-            echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
-            echo "No SSH keys have been exchanged yet.<br>Use the 'Exchange SSH Keys' tab to add your first connection."
-            echo "</div>"
+            log_info "SSH connection to ${username}@$display_host failed (individual key authentication failed)"
+            
+            # Update connection status in registry
+            local conn_id=$(jq -r --arg host "$host" --arg username "$username" --arg port "$port" \
+                '.connections[] | select(.host == $host and .username == $username and (.port | tostring) == $port) | .id' \
+                "$CONNECTIONS_REGISTRY" 2>/dev/null)
+            if [[ -n "$conn_id" ]] && [[ "$conn_id" != "null" ]]; then
+                update_connection_test_result "$conn_id" "failed"
+            fi
+            return 1
         fi
     else
-        echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
-        echo "No SSH keys have been exchanged yet.<br>Use the 'Exchange SSH Keys' tab to add your first connection."
-        echo "</div>"
+        # Try with global key or no key (general testing)
+        if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" "echo 'SSH connection successful'" 2>/dev/null; then
+            log_info "SSH connection to ${username}@$display_host successful (key-based authentication)"
+            return 0
+        else
+            log_info "SSH connection to ${username}@$display_host failed (no key-based access)"
+            return 1
+        fi
     fi
 }
 
-# Test all previously exchanged connections
+# List exchanged SSH keys from JSON registry
+list_exchanged_keys() {
+    if [[ ! -f "$CONNECTIONS_REGISTRY" ]]; then
+        echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
+        echo "No SSH keys have been exchanged yet.<br>Use the 'Exchange Keys' tab to add your first connection."
+        echo "</div>"
+        return 0
+    fi
+    
+    # Check if jq is available
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "<div style='color: #dc3545; text-align: center; padding: 20px; border: 1px solid #dc3545; border-radius: 5px;'>"
+        echo "Error: jq is required to display connections.<br>Please install jq to use this feature."
+        echo "</div>"
+        return 1
+    fi
+    
+    # Get connection count
+    local connection_count=$(jq '.connections | length' "$CONNECTIONS_REGISTRY" 2>/dev/null || echo "0")
+    
+    if [[ "$connection_count" -eq 0 ]]; then
+        echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
+        echo "No SSH keys have been exchanged yet.<br>Use the 'Exchange Keys' tab to add your first connection."
+        echo "</div>"
+        return 0
+    fi
+    
+    echo "<h4>Successfully Exchanged Keys:</h4>"
+    echo "<div style='margin-bottom: 15px;'>"
+    
+    # Process each connection using jq
+    local connections_json=$(jq -c '.connections[]' "$CONNECTIONS_REGISTRY" 2>/dev/null)
+    
+    if [[ -n "$connections_json" ]]; then
+        echo "$connections_json" | while IFS= read -r connection; do
+            # Extract connection details
+            local conn_id=$(echo "$connection" | jq -r '.id')
+            local host=$(echo "$connection" | jq -r '.host')
+            local username=$(echo "$connection" | jq -r '.username')
+            local port=$(echo "$connection" | jq -r '.port')
+            local created=$(echo "$connection" | jq -r '.created')
+            local last_tested=$(echo "$connection" | jq -r '.last_tested')
+            local last_successful=$(echo "$connection" | jq -r '.last_successful')
+            local status=$(echo "$connection" | jq -r '.status')
+            
+            # Format timestamps for display
+            local created_display=""
+            if [[ "$created" != "null" ]]; then
+                created_display=$(date -d "$created" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$created")
+            fi
+            
+            local last_tested_display=""
+            if [[ "$last_tested" != "null" ]]; then
+                last_tested_display=$(date -d "$last_tested" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$last_tested")
+            fi
+            
+            # Display hostname with port if non-standard
+            local display_host="$host"
+            if [[ "$port" != "22" ]]; then
+                display_host="${host}:${port}"
+            fi
+            
+            # Determine status color and text
+            local status_color="#666"
+            local status_text="Unknown"
+            
+            if [[ "$status" == "active" ]]; then
+                status_color="#28a745"
+                status_text="✓ Active"
+            elif [[ "$status" == "inactive" ]]; then
+                status_color="#dc3545"
+                status_text="✗ Inactive"
+            fi
+            
+            # Add last tested info if available
+            local status_detail=""
+            if [[ "$last_tested_display" != "" ]]; then
+                status_detail="<div style='font-size: 10px; color: #888;'>Last tested: $last_tested_display</div>"
+            fi
+            
+            echo "<div style='margin-bottom: 10px; padding: 12px; border: 1px solid #ddd; border-radius: 5px; background: #f8f9fa;'>"
+            echo "  <div style='display: flex; justify-content: space-between; align-items: center;'>"
+            echo "    <div>"
+            echo "      <strong style='color: #333;'>$display_host</strong>"
+            echo "      <span style='color: #666; margin-left: 10px;'>User: $username</span>"
+            echo "      <div style='font-size: 11px; color: #888; margin-top: 2px;'>Created: $created_display</div>"
+            echo "      $status_detail"
+            echo "    </div>"
+            echo "    <div style='display: flex; align-items: center; gap: 15px;'>"
+            echo "      <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
+            echo "      <button onclick=\"revokeExchangedKey('$conn_id', '$display_host', '$host', '$username', '$port', '1')\" style='background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;' title='Revoke SSH access'>Revoke Access</button>"
+            echo "    </div>"
+            echo "  </div>"
+            echo "</div>"
+        done
+    fi
+    
+    echo "</div>"
+}
+
+# Test all previously exchanged connections using individual keys
 test_all_connections() {
-    if [[ ! -f "$EXCHANGED_KEYS_FILE" ]] || [[ ! -s "$EXCHANGED_KEYS_FILE" ]]; then
+    if [[ ! -f "$CONNECTIONS_REGISTRY" ]]; then
+        log_info "No connections registry found - no connections to test"
+        return 0
+    fi
+    
+    if ! command -v jq >/dev/null 2>&1; then
+        log_info "jq not available - cannot test connections"
+        return 1
+    fi
+    
+    local connection_count=$(jq '.connections | length' "$CONNECTIONS_REGISTRY" 2>/dev/null || echo "0")
+    
+    if [[ "$connection_count" -eq 0 ]]; then
         log_info "No exchanged keys to test"
         return 0
     fi
     
-    log_info "Testing all exchanged SSH connections..."
+    log_info "Testing all exchanged SSH connections using individual keys..."
     
     local success_count=0
     local total_count=0
     
-    while IFS= read -r line; do
-        if [[ -n "$line" ]]; then
-            # Extract connection info from the line (format: "YYYY-MM-DD HH:MM:SS user@host:port")
-            local host_info=$(echo "$line" | awk '{print $3}')
-            local username=$(echo "$host_info" | cut -d'@' -f1)
-            local host_with_port=$(echo "$host_info" | cut -d'@' -f2)
-            
-            # Split hostname and port (format: hostname:port or just hostname)
-            local host
-            local port
-            if [[ "$host_with_port" == *":"* ]]; then
-                host=$(echo "$host_with_port" | cut -d':' -f1)
-                port=$(echo "$host_with_port" | cut -d':' -f2)
-            else
-                host="$host_with_port"
-                port="22"
-            fi
+    # Get all connections from JSON registry
+    local connections_json=$(jq -c '.connections[]' "$CONNECTIONS_REGISTRY" 2>/dev/null)
+    
+    if [[ -n "$connections_json" ]]; then
+        echo "$connections_json" | while IFS= read -r connection; do
+            # Extract connection details
+            local conn_id=$(echo "$connection" | jq -r '.id')
+            local host=$(echo "$connection" | jq -r '.host')
+            local username=$(echo "$connection" | jq -r '.username')
+            local port=$(echo "$connection" | jq -r '.port')
+            local private_key=$(echo "$connection" | jq -r '.private_key')
             
             ((total_count++))
             
-            # Use port in SSH connection test
-            if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
-                local display_host="$host"
-                if [[ "$port" != "22" ]]; then
-                    display_host="${host}:${port}"
-                fi
-                log_info "✓ Connection to ${username}@${display_host} successful"
-                ((success_count++))
-            else
-                local display_host="$host"
-                if [[ "$port" != "22" ]]; then
-                    display_host="${host}:${port}"
-                fi
-                log_info "✗ Connection to ${username}@${display_host} failed"
+            # Display hostname with port if non-standard
+            local display_host="$host"
+            if [[ "$port" != "22" ]]; then
+                display_host="${host}:${port}"
             fi
-        fi
-    done < "$EXCHANGED_KEYS_FILE"
-    
-    log_info "Connection test complete: $success_count/$total_count connections successful"
+            
+            # Test connection using individual key
+            if [[ -f "$private_key" ]] && ssh -i "$private_key" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+                log_info "✓ Connection to ${username}@${display_host} successful (using individual key)"
+                ((success_count++))
+                # Update connection status in registry
+                update_connection_test_result "$conn_id" "success"
+            else
+                log_info "✗ Connection to ${username}@${display_host} failed"
+                # Update connection status in registry
+                update_connection_test_result "$conn_id" "failed"
+                
+                # Check if key file exists
+                if [[ ! -f "$private_key" ]]; then
+                    log_info "  ⚠ Individual key file missing: $private_key"
+                fi
+            fi
+        done
+        
+        log_info "Connection test complete: $success_count/$total_count connections successful"
+    else
+        log_info "No connections found in registry"
+    fi
 }
 
 # Scan network for SSH services
@@ -845,8 +1042,8 @@ process_operation() {
             remove_authorized_key "$KEY_LINE_NUMBER"
             ;;
         "revoke_exchanged_key")
-            if [[ -z "$KEY_LINE_NUMBER" ]]; then
-                error_exit "Missing line number parameter for key revocation"
+            if [[ -z "$CONNECTION_ID" ]]; then
+                error_exit "Missing connection ID parameter for key revocation"
             fi
             if [[ -z "$REVOKE_TYPE" ]]; then
                 error_exit "Missing revoke type parameter"
@@ -856,9 +1053,9 @@ process_operation() {
                 if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USERNAME" ]]; then
                     error_exit "Missing required parameters for full revocation"
                 fi
-                revoke_ssh_access_full "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PORT" "$KEY_LINE_NUMBER"
+                revoke_connection_full "$CONNECTION_ID" "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PORT"
             elif [[ "$REVOKE_TYPE" == "local_only" ]]; then
-                revoke_ssh_access_local "$KEY_LINE_NUMBER"
+                revoke_connection_local "$CONNECTION_ID"
             else
                 error_exit "Invalid revoke type: $REVOKE_TYPE"
             fi
@@ -870,6 +1067,165 @@ process_operation() {
 }
 
 # Main execution
+# New revocation system for individual SSH keys
+revoke_connection_full() {
+    local conn_id="$1"
+    local host="$2"
+    local username="$3"
+    local port="$4"
+    
+    log_info "Starting full connection revocation for ${username}@${host}:${port} (connection: $conn_id)..."
+    
+    # Get connection details from registry
+    if [[ ! -f "$CONNECTIONS_REGISTRY" ]] || ! command -v jq >/dev/null 2>&1; then
+        error_exit "Cannot access connections registry - jq required"
+    fi
+    
+    local connection_data=$(jq -r --arg id "$conn_id" '.connections[] | select(.id == $id)' "$CONNECTIONS_REGISTRY" 2>/dev/null)
+    
+    if [[ -z "$connection_data" ]] || [[ "$connection_data" == "null" ]]; then
+        error_exit "Connection $conn_id not found in registry"
+    fi
+    
+    local private_key=$(echo "$connection_data" | jq -r '.private_key')
+    local public_key=$(echo "$connection_data" | jq -r '.public_key')
+    
+    if [[ ! -f "$private_key" ]] || [[ ! -f "$public_key" ]]; then
+        log_info "⚠ Individual key files not found - performing local cleanup only"
+        revoke_connection_local "$conn_id"
+        return $?
+    fi
+    
+    # Get our public key's base64 material for reliable matching
+    local our_key_material=$(cat "$public_key" | awk '{print $2}')
+    log_info "Using individual public key: $public_key"
+    log_info "Key material: ${our_key_material:0:20}...${our_key_material: -20}"
+    
+    # Test connection first using individual key
+    if ! ssh -i "$private_key" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+        log_info "⚠ Cannot connect to ${username}@${host}:${port} using individual key - server may be offline"
+        log_info "Performing local cleanup only..."
+        revoke_connection_local "$conn_id"
+        return $?
+    fi
+    
+    log_info "Connected successfully, removing individual public key from remote authorized_keys..."
+    
+    # Create remote script for individual key removal
+    local remote_script=$(cat << 'EOF'
+AUTH_KEYS_FILE="$HOME/.ssh/authorized_keys"
+OUR_KEY_MATERIAL="$1"
+
+# Check if authorized_keys file exists
+if [[ ! -f "$AUTH_KEYS_FILE" ]]; then
+    echo "KEY_NOT_FOUND: No authorized_keys file found"
+    exit 3
+fi
+
+# Check if our key material is present with literal string matching
+if ! grep -F -q "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE"; then
+    echo "KEY_NOT_FOUND: Key material not found in authorized_keys"
+    exit 3
+fi
+
+# Create backup
+cp "$AUTH_KEYS_FILE" "${AUTH_KEYS_FILE}.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
+
+# Remove key with literal string matching and proper exit code handling
+grep -F -v "$OUR_KEY_MATERIAL" "$AUTH_KEYS_FILE" > "${AUTH_KEYS_FILE}.tmp" 2>&1
+grep_exit_code=$?
+
+# Exit codes: 0=success with output, 1=no output (empty file), 2=error
+if [[ $grep_exit_code -eq 0 ]] || [[ $grep_exit_code -eq 1 ]]; then
+    mv "${AUTH_KEYS_FILE}.tmp" "$AUTH_KEYS_FILE"
+    chmod 600 "$AUTH_KEYS_FILE" 2>/dev/null || true
+    echo "Successfully removed SSH key from authorized_keys"
+else
+    echo "ERROR: Grep command failed with exit code: $grep_exit_code"
+    exit 1
+fi
+EOF
+)
+    
+    # Execute remote script using individual key
+    local ssh_output
+    ssh_output=$(ssh -i "$private_key" -p "$port" -o BatchMode=yes -o ConnectTimeout=10 "${username}@${host}" "bash -s '$our_key_material'" <<< "$remote_script" 2>&1)
+    local ssh_exit_code=$?
+    
+    log_info "Remote script output: $ssh_output"
+    
+    if [[ $ssh_exit_code -eq 0 ]]; then
+        log_info "Successfully removed individual key from remote server"
+        # Now perform local cleanup
+        revoke_connection_local "$conn_id"
+        return 0
+    else
+        # Handle specific error types
+        if [[ "$ssh_output" == *"PERMISSION_ERROR:"* ]]; then
+            echo "PERMISSION_ERROR: $ssh_output"
+            exit 2
+        elif [[ "$ssh_output" == *"KEY_NOT_FOUND:"* ]]; then
+            echo "KEY_NOT_FOUND: $ssh_output"  
+            # Still perform local cleanup for missing keys
+            revoke_connection_local "$conn_id"
+            exit 3
+        else
+            log_info "Remote key removal failed, performing local cleanup..."
+            revoke_connection_local "$conn_id"
+            return 1
+        fi
+    fi
+}
+
+# Local revocation for individual connection
+revoke_connection_local() {
+    local conn_id="$1"
+    
+    log_info "Performing local cleanup for connection: $conn_id"
+    
+    if [[ ! -f "$CONNECTIONS_REGISTRY" ]] || ! command -v jq >/dev/null 2>&1; then
+        error_exit "Cannot access connections registry - jq required"
+    fi
+    
+    # Get connection details
+    local connection_data=$(jq -r --arg id "$conn_id" '.connections[] | select(.id == $id)' "$CONNECTIONS_REGISTRY" 2>/dev/null)
+    
+    if [[ -z "$connection_data" ]] || [[ "$connection_data" == "null" ]]; then
+        error_exit "Connection $conn_id not found in registry"
+    fi
+    
+    local private_key=$(echo "$connection_data" | jq -r '.private_key')
+    local public_key=$(echo "$connection_data" | jq -r '.public_key')
+    
+    # Remove individual key files
+    if [[ -f "$private_key" ]]; then
+        rm -f "$private_key"
+        log_info "Removed individual private key: $private_key"
+    fi
+    
+    if [[ -f "$public_key" ]]; then
+        rm -f "$public_key"
+        log_info "Removed individual public key: $public_key"
+    fi
+    
+    # Remove connection from JSON registry
+    local temp_file="/tmp/connections_revoke.json"
+    jq --arg id "$conn_id" \
+       '.last_updated = now | .connections = (.connections | map(select(.id != $id)))' \
+       "$CONNECTIONS_REGISTRY" > "$temp_file"
+    
+    if [[ $? -eq 0 ]]; then
+        mv "$temp_file" "$CONNECTIONS_REGISTRY"
+        chmod 644 "$CONNECTIONS_REGISTRY" 2>/dev/null || true
+        log_info "Removed connection $conn_id from registry"
+        log_info "Local cleanup completed successfully"
+        return 0
+    else
+        rm -f "$temp_file" 2>/dev/null || true
+        error_exit "Failed to update connections registry"
+    fi
+}
+
 main() {
     validate_environment
     process_operation "$OPERATION"

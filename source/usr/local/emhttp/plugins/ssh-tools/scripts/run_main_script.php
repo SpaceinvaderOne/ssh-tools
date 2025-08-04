@@ -200,15 +200,15 @@ switch ($operation) {
         break;
         
     case 'revoke_exchanged_key':
-        if (isset($_POST['line_number'])) {
-            $lineNumber = intval($_POST['line_number']);
-            if ($lineNumber <= 0) {
-                echo "Error: Invalid line number";
+        if (isset($_POST['connection_id'])) {
+            $connectionId = trim($_POST['connection_id']);
+            if (empty($connectionId)) {
+                echo "Error: Invalid connection ID";
                 exit;
             }
-            $env['KEY_LINE_NUMBER'] = $lineNumber;
+            $env['CONNECTION_ID'] = $connectionId;
         } else {
-            echo "Error: Line number is required for key revocation";
+            echo "Error: Connection ID is required for key revocation";
             exit;
         }
         

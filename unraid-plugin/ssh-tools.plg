@@ -2,10 +2,10 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name                 "ssh-tools">
 <!ENTITY author               "SpaceInvaderOne">
-<!ENTITY plugin_version       "2025.08.04.0826">
+<!ENTITY plugin_version       "2025.08.04.0914">
 <!ENTITY launch_page          "Settings/&name;">
-<!ENTITY plugin_url           "https://github.com/SpaceinvaderOne/ssh-tools/raw/main/packages/pluginmain/ssh-tools-2025.08.04.0826-x86_64.txz">
-<!ENTITY plugin_md5           "d500eb4a22cb8057ed99f9b6820fefcc">
+<!ENTITY plugin_url           "https://github.com/SpaceinvaderOne/ssh-tools/raw/main/packages/pluginmain/ssh-tools-2025.08.04.0914-x86_64.txz">
+<!ENTITY plugin_md5           "4b06223745cbd9a729eff83424a8d995">
 ]>
 
 <PLUGIN name="&name;" author="&author;" version="&plugin_version;" min="6.9.0" launch="&launch_page;" icon="gear">
@@ -111,6 +111,7 @@ install_dependency() {
 
 # Install required dependencies for ssh-tools plugin
 install_dependency "sshpass" "sshpass-1.05-x86_64-1_SBo.tgz" "sshpass"
+install_dependency "jq" "jq-1.7.1-x86_64-1.tgz" "jq"
 
 # Future dependencies can be added here:
 # install_dependency "expect" "expect-5.45-x86_64-1.tgz" "expect"

@@ -763,7 +763,7 @@ function performFullRevocation(keyId, displayHost, hostname, username, port, lin
   });
   
   executeOperation('revoke_exchanged_key', {
-    line_number: lineNumber,
+    connection_id: keyId,
     revoke_type: 'full',
     host: hostname,
     username: username,
