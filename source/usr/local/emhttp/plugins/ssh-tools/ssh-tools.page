@@ -125,20 +125,60 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
 
 <!-- Tab Navigation -->
 <div class="tab-nav">
-  <button type="button" onclick="showTab('exchange')" id="btn-exchange" class="active">EXCHANGE SSH KEYS</button>
-  <button type="button" onclick="showTab('keys')" id="btn-keys">EXCHANGED KEYS</button>
-  <button type="button" onclick="showTab('status')" id="btn-status">STATUS</button>
+  <button type="button" onclick="showTab('manage')" id="btn-manage" class="active">MANAGE SSH KEYS</button>
+  <button type="button" onclick="showTab('exchange')" id="btn-exchange">EXCHANGE KEYS</button>
+  <button type="button" onclick="showTab('tools')" id="btn-tools">SSH TOOLS</button>
+  <button type="button" onclick="showTab('debug')" id="btn-debug">DEBUG LOG</button>
 </div>
 
-<!-- SSH Key Exchange Tab -->
-<div id="content-exchange" class="tab-content active">
-  <h2>SSH Key Exchange</h2>
+<!-- Manage SSH Keys Tab -->
+<div id="content-manage" class="tab-content active">
+  <h2>Manage SSH Keys</h2>
   
-  <div style="margin-bottom: 15px; padding: 10px; border-radius: 5px; border-left: 4px solid #FF9800;">
-    <strong>Note:</strong> This will generate an ed25519 SSH key if one doesn't exist, then exchange it with the target machine. 
-    If keys are already exchanged, it will add the existing connection to your tracking list (useful after plugin reinstall).
-    Essential for passwordless SSH connections needed for ZFS replication, rsync, and remote management.
+  <p>View and manage your SSH key connections and access permissions.</p>
+  
+  <dl>
+    <dt>&nbsp;</dt>
+    <dd>
+      <span class="buttons-spaced">
+        <button type="button" onclick="refreshExchangedKeys()">Refresh Lists</button>
+        <button type="button" onclick="testAllConnections()">Test All Connections</button>
+      </span>
+      <div class="description">Refresh both lists and test connectivity</div>
+    </dd>
+  </dl>
+  
+  <div style="margin-top: 20px;">
+    <h3>Authorized SSH Keys</h3>
+    <p>Machines that are authorized to connect to this server</p>
+    <dl>
+      <dt>&nbsp;</dt>
+      <dd>
+        <span class="buttons-spaced">
+          <button type="button" onclick="refreshAuthorizedKeys()">Refresh List</button>
+        </span>
+        <div class="description">Manage machines authorized to connect to your server</div>
+      </dd>
+    </dl>
+    <div id="authorizedKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
+      Loading authorized keys...
+    </div>
   </div>
+  
+  <div style="margin-top: 20px;">
+    <h3>Exchanged SSH Keys</h3>
+    <p>Track and manage machines where SSH keys have been successfully exchanged.</p>
+    <div id="exchangedKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
+      Loading exchanged keys...
+    </div>
+  </div>
+</div>
+
+<!-- Exchange SSH Keys Tab -->
+<div id="content-exchange" class="tab-content">
+  <h2>Exchange SSH Keys</h2>
+  
+  <p>Establish passwordless SSH connections with remote machines.</p>
   
   <form onsubmit="return false;">
     <dl>
@@ -189,64 +229,29 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
     </dl>
   </form>
   
-  <h3>Current SSH Key Status</h3>
+  <h3>SSH Key Status</h3>
   <dl>
-    <dt>Local SSH Key</dt>
+    <dt>Server SSH Key</dt>
     <dd>
       <div style="margin-bottom: 10px;">
         <span id="keyStatus">Checking...</span>
       </div>
-      <span><button type="button" onclick="checkKeyStatus()">Refresh Status</button></span>
-      <div class="description">Status of your Unraid server's SSH key</div>
+      <span><button type="button" onclick="checkKeyStatus()">Check Status</button></span>
+      <div class="description">SSH key will be generated automatically if needed</div>
     </dd>
   </dl>
 </div>
 
-<!-- Exchanged Keys Tab -->
-<div id="content-keys" class="tab-content">
-  <h2>Exchanged SSH Keys</h2>
+<!-- SSH Tools Tab -->
+<div id="content-tools" class="tab-content">
+  <h2>SSH Tools</h2>
   
-  <p>Track and manage machines where SSH keys have been successfully exchanged.</p>
-  
-  <dl>
-    <dt>&nbsp;</dt>
-    <dd>
-      <span class="buttons-spaced">
-        <button type="button" onclick="refreshExchangedKeys()">Refresh List</button>
-        <button type="button" onclick="testAllConnections()">Test All Connections</button>
-      </span>
-      <div class="description">Manage your exchanged SSH keys and test connectivity</div>
-    </dd>
-  </dl>
+  <p>Connection testing and network scanning utilities for SSH management.</p>
   
   <div style="margin-top: 20px;">
-    <h3>Exchanged Keys</h3>
-    <div id="exchangedKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
-      Loading exchanged keys...
-    </div>
-  </div>
-  
-  <div style="margin-top: 20px;">
-    <h3>Authorized SSH Keys</h3>
-    <p>Machines that are authorized to connect to this server</p>
+    <h3>Connection Testing</h3>
     <dl>
-      <dt>&nbsp;</dt>
-      <dd>
-        <span class="buttons-spaced">
-          <button type="button" onclick="refreshAuthorizedKeys()">Refresh List</button>
-        </span>
-        <div class="description">Manage machines authorized to connect to your server</div>
-      </dd>
-    </dl>
-    <div id="authorizedKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
-      Loading authorized keys...
-    </div>
-  </div>
-  
-  <div style="margin-top: 20px;">
-    <h3>SSH Tools</h3>
-    <dl>
-      <dt>Connection Testing</dt>
+      <dt>Test Host</dt>
       <dd>
         <input type="text" id="testHost" class="short" placeholder="IP or hostname to test">
         <div style="margin-top: 5px;">
@@ -255,9 +260,12 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
         <div class="description">Test SSH connectivity to a specific host</div>
       </dd>
     </dl>
-    
+  </div>
+  
+  <div style="margin-top: 20px;">
+    <h3>Network Scanning</h3>
     <dl>
-      <dt>Network Scan</dt>
+      <dt>Network Range</dt>
       <dd>
         <input type="text" id="scanNetwork" class="short" placeholder="192.168.1.0/24" value="192.168.1.0/24">
         <div style="margin-top: 5px;">
@@ -269,11 +277,11 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   </div>
 </div>
 
-<!-- Status Tab -->
-<div id="content-status" class="tab-content">
-  <h2>Status</h2>
+<!-- Debug Log Tab -->
+<div id="content-debug" class="tab-content">
+  <h2>Debug Log</h2>
   
-  <p>Operation output and status information will be displayed here.</p>
+  <p>Technical output and debugging information from plugin operations.</p>
   
   <dl>
     <dt>&nbsp;</dt>
@@ -327,7 +335,7 @@ function showTab(tabId) {
   document.getElementById('btn-' + tabId).classList.add('active');
   
   // Refresh data when switching to certain tabs
-  if (tabId === 'keys') {
+  if (tabId === 'manage') {
     refreshExchangedKeys();
     refreshAuthorizedKeys();
   } else if (tabId === 'exchange') {
@@ -516,13 +524,13 @@ function performSSHKeyExchange() {
         title: 'Success!',
         text: 'SSH keys have been successfully exchanged with ' + displayHost,
         type: 'success',
-        confirmButtonText: 'View Exchanged Keys',
+        confirmButtonText: 'View SSH Keys',
         closeOnConfirm: true
       }, function() {
-        // Auto-navigate to Exchanged Keys tab
+        // Auto-navigate to Manage SSH Keys tab
         checkKeyStatus();
         refreshExchangedKeys();
-        showTab('keys');
+        showTab('manage');
       });
     } else if (response.toLowerCase().includes('error')) {
       swal({
@@ -849,13 +857,14 @@ function executeOperation(operation, data, successCallback, errorCallback) {
 
 // Initialize the interface
 $(document).ready(function() {
-  // Start on the exchange tab first, before any AJAX calls
-  showTab('exchange');
+  // Start on the manage tab first, before any AJAX calls
+  showTab('manage');
   
   // Add click handlers for tab buttons to ensure they work
+  $('#btn-manage').click(function() { showTab('manage'); });
   $('#btn-exchange').click(function() { showTab('exchange'); });
-  $('#btn-keys').click(function() { showTab('keys'); });
-  $('#btn-status').click(function() { showTab('status'); });
+  $('#btn-tools').click(function() { showTab('tools'); });
+  $('#btn-debug').click(function() { showTab('debug'); });
   
   // Welcome message - add to status but don't switch to it
   updateStatus('SSH Tools plugin initialized successfully');
