@@ -166,7 +166,7 @@ generate_connection_key() {
         
         # Generate key silently (no output that corrupts return value)
         ssh-keygen -t "$SSH_KEY_TYPE" -f "$private_key" -N "" \
-            -C "ssh-tools-${username}@${comment_host}:${port}-created:$(date +%Y%m%d%H%M%S)" >/dev/null 2>&1
+            -C "PAIR-${username}@${comment_host}:${port}-created:$(date +%Y%m%d%H%M%S)" >/dev/null 2>&1
         
         # Set proper permissions
         chmod 600 "$private_key" 2>/dev/null || true
