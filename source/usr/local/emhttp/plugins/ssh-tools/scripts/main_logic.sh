@@ -157,8 +157,6 @@ generate_connection_key() {
     local public_key="${private_key}.pub"
     
     if [[ ! -f "$private_key" ]]; then
-        log_info "Generating individual SSH key: $unique_key_name"
-        
         # Enhanced comment with hostname resolution
         local hostname=$(resolve_hostname "$host")
         local comment_host="$host"
@@ -166,20 +164,19 @@ generate_connection_key() {
             comment_host="${hostname}(${host})"
         fi
         
+        # Generate key silently (no output that corrupts return value)
         ssh-keygen -t "$SSH_KEY_TYPE" -f "$private_key" -N "" \
-            -C "ssh-tools-${username}@${comment_host}:${port}-created:$(date +%Y%m%d%H%M%S)"
+            -C "ssh-tools-${username}@${comment_host}:${port}-created:$(date +%Y%m%d%H%M%S)" >/dev/null 2>&1
         
         # Set proper permissions
         chmod 600 "$private_key" 2>/dev/null || true
         chmod 644 "$public_key" 2>/dev/null || true
         
-        log_info "Individual SSH key generated: $private_key"
-        
-        # Store the actual paths used (for JSON registry)
+        # Return the path (no debug output in functions that return values)
         echo "$private_key"
         return 0
     else
-        debug_log "SSH key already exists: $private_key"
+        # Return existing key path (no debug output)
         echo "$private_key"
         return 0
     fi
@@ -343,6 +340,9 @@ exchange_ssh_keys() {
     local private_key=$(generate_connection_key "$conn_id" "$host" "$username" "$port")
     local public_key="${private_key}.pub"
     
+    # Extract the key name for user feedback
+    local key_name=$(basename "$private_key")
+    log_info "Generated individual SSH key: $key_name"
     log_info "Using individual SSH key: $public_key"
     
     # Test connection first with password
