@@ -63,29 +63,124 @@ validate_environment() {
     ensure_data_dir
 }
 
-# Generate individual SSH key for a specific connection
+# Resolve hostname from IP or validate hostname
+resolve_hostname() {
+    local host="$1"
+    local resolved_name=""
+    
+    # Try reverse DNS lookup for IP addresses
+    if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        resolved_name=$(nslookup "$host" 2>/dev/null | grep "name =" | head -1 | awk '{print $4}' | sed 's/\.$//') 2>/dev/null || true
+        # If reverse lookup failed or returned IP, use IP as identifier
+        if [[ -z "$resolved_name" ]] || [[ "$resolved_name" == "$host" ]]; then
+            resolved_name=""
+        fi
+    else
+        # For hostnames, validate they resolve
+        if nslookup "$host" >/dev/null 2>&1; then
+            resolved_name="$host"
+        fi
+    fi
+    
+    echo "$resolved_name"
+}
+
+# Create safe filename from hostname or IP
+create_safe_identifier() {
+    local host="$1"
+    local identifier=""
+    
+    # Try to get hostname first
+    local hostname=$(resolve_hostname "$host")
+    
+    if [[ -n "$hostname" ]]; then
+        # Use hostname, make it filesystem-safe
+        identifier=$(echo "$hostname" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9.-]/-/g' | sed 's/--*/-/g' | sed 's/^-\|-$//g')
+        # Limit length
+        if [[ ${#identifier} -gt 20 ]]; then
+            identifier="${identifier:0:20}"
+        fi
+    fi
+    
+    # Fallback to IP with dashes if hostname not available or too complex
+    if [[ -z "$identifier" ]] || [[ ${#identifier} -lt 3 ]]; then
+        identifier=$(echo "$host" | sed 's/\./-/g' | sed 's/[^a-z0-9-]/-/g')
+    fi
+    
+    echo "$identifier"
+}
+
+# Generate PAIR- formatted key filename
+generate_pair_key_name() {
+    local host="$1"
+    local username="$2"
+    local port="$3"
+    
+    local identifier=$(create_safe_identifier "$host")
+    local port_suffix="p${port}"
+    
+    echo "PAIR-${identifier}-${username}-${port_suffix}_ed25519"
+}
+
+# Check for key name collisions and add suffix if needed
+get_unique_key_name() {
+    local base_name="$1"
+    local key_path="/root/.ssh/${base_name}"
+    
+    # If no collision, return original name
+    if [[ ! -f "$key_path" ]] && [[ ! -f "${key_path}.pub" ]]; then
+        echo "$base_name"
+        return 0
+    fi
+    
+    # Handle collision with numbered suffix
+    local counter=2
+    while [[ -f "/root/.ssh/${base_name%_ed25519}-${counter}_ed25519" ]] || [[ -f "/root/.ssh/${base_name%_ed25519}-${counter}_ed25519.pub" ]]; do
+        ((counter++))
+    done
+    
+    echo "${base_name%_ed25519}-${counter}_ed25519"
+}
+
+# Generate individual SSH key with enhanced PAIR- naming
 generate_connection_key() {
     local conn_id="$1"
     local host="$2"
     local username="$3"
     local port="$4"
     
-    local private_key="/root/.ssh/ssh-tools-${conn_id}_ed25519"
+    # Generate descriptive key name
+    local base_key_name=$(generate_pair_key_name "$host" "$username" "$port")
+    local unique_key_name=$(get_unique_key_name "$base_key_name")
+    
+    local private_key="/root/.ssh/${unique_key_name}"
     local public_key="${private_key}.pub"
     
     if [[ ! -f "$private_key" ]]; then
-        log_info "Generating individual SSH key for connection ${conn_id}..."
+        log_info "Generating individual SSH key: $unique_key_name"
+        
+        # Enhanced comment with hostname resolution
+        local hostname=$(resolve_hostname "$host")
+        local comment_host="$host"
+        if [[ -n "$hostname" ]] && [[ "$hostname" != "$host" ]]; then
+            comment_host="${hostname}(${host})"
+        fi
+        
         ssh-keygen -t "$SSH_KEY_TYPE" -f "$private_key" -N "" \
-            -C "ssh-tools-${username}@${host}:${port}-$(date +%Y%m%d)"
+            -C "ssh-tools-${username}@${comment_host}:${port}-created:$(date +%Y%m%d%H%M%S)"
         
         # Set proper permissions
         chmod 600 "$private_key" 2>/dev/null || true
         chmod 644 "$public_key" 2>/dev/null || true
         
         log_info "Individual SSH key generated: $private_key"
+        
+        # Store the actual paths used (for JSON registry)
+        echo "$private_key"
         return 0
     else
         debug_log "SSH key already exists: $private_key"
+        echo "$private_key"
         return 0
     fi
 }
@@ -101,7 +196,7 @@ add_connection_to_registry() {
     local host="$2"
     local username="$3"
     local port="$4"
-    local private_key="/root/.ssh/ssh-tools-${conn_id}_ed25519"
+    local private_key="$5"  # Now passed as parameter from generate_connection_key
     local public_key="${private_key}.pub"
     local timestamp="$(date -Iseconds)"
     
@@ -245,9 +340,7 @@ exchange_ssh_keys() {
     log_info "Generated connection ID: $conn_id"
     
     # Generate individual SSH key for this connection
-    generate_connection_key "$conn_id" "$host" "$username" "$port"
-    
-    local private_key="/root/.ssh/ssh-tools-${conn_id}_ed25519"
+    local private_key=$(generate_connection_key "$conn_id" "$host" "$username" "$port")
     local public_key="${private_key}.pub"
     
     log_info "Using individual SSH key: $public_key"
@@ -294,8 +387,8 @@ exchange_ssh_keys() {
     if ssh -i "$private_key" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
         log_info "SSH key exchange completed successfully!"
         
-        # Add connection to JSON registry
-        add_connection_to_registry "$conn_id" "$host" "$username" "$port"
+        # Add connection to JSON registry with individual key path
+        add_connection_to_registry "$conn_id" "$host" "$username" "$port" "$private_key"
         
         # Update test result as successful
         update_connection_test_result "$conn_id" "success"
