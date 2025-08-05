@@ -340,6 +340,91 @@ get_key_status() {
     fi
 }
 
+# Check if connection already exists in JSON registry
+check_existing_connection_in_registry() {
+    local host="$1"
+    local username="$2"
+    local port="$3"
+    
+    if [[ ! -f "$CONNECTIONS_REGISTRY" ]] || ! command -v jq >/dev/null 2>&1; then
+        echo "false"
+        return 1
+    fi
+    
+    # Check for existing connection with same host, username, and port
+    local existing_connection=$(jq -r --arg host "$host" --arg username "$username" --arg port "$port" \
+        '.connections[] | select(.host == $host and .username == $username and (.port | tostring) == $port) | .id' \
+        "$CONNECTIONS_REGISTRY" 2>/dev/null)
+    
+    if [[ -n "$existing_connection" ]] && [[ "$existing_connection" != "null" ]]; then
+        echo "true"
+        return 0
+    else
+        echo "false"
+        return 1
+    fi
+}
+
+# Test if we already have SSH key access to the target server
+test_existing_ssh_key_access() {
+    local host="$1"
+    local username="$2"
+    local port="$3"
+    
+    # Test SSH connectivity using any existing keys (BatchMode prevents password prompts)
+    if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${username}@${host}" true 2>/dev/null; then
+        echo "true"
+        return 0
+    else
+        echo "false"
+        return 1
+    fi
+}
+
+# Get details about existing connections for user display
+get_existing_connection_details() {
+    local host="$1"
+    local username="$2"
+    local port="$3"
+    
+    if [[ ! -f "$CONNECTIONS_REGISTRY" ]] || ! command -v jq >/dev/null 2>&1; then
+        echo "No registry available"
+        return 1
+    fi
+    
+    # Get connection details from registry
+    local connection_info=$(jq -r --arg host "$host" --arg username "$username" --arg port "$port" \
+        '.connections[] | select(.host == $host and .username == $username and (.port | tostring) == $port) | 
+         "ID: " + .id + " | Created: " + .created + " | Status: " + .status' \
+        "$CONNECTIONS_REGISTRY" 2>/dev/null)
+    
+    if [[ -n "$connection_info" ]] && [[ "$connection_info" != "null" ]]; then
+        echo "$connection_info"
+    else
+        echo "Connection exists but not in registry"
+    fi
+}
+
+# Comprehensive duplicate detection
+detect_duplicate_ssh_access() {
+    local host="$1"
+    local username="$2"
+    local port="$3"
+    
+    local registry_exists=$(check_existing_connection_in_registry "$host" "$username" "$port")
+    local ssh_access_exists=$(test_existing_ssh_key_access "$host" "$username" "$port")
+    
+    # Return results in format: "registry_status|ssh_status|details"
+    local details=""
+    if [[ "$registry_exists" == "true" ]]; then
+        details=$(get_existing_connection_details "$host" "$username" "$port")
+    elif [[ "$ssh_access_exists" == "true" ]]; then
+        details="SSH access exists (not tracked in registry)"
+    fi
+    
+    echo "${registry_exists}|${ssh_access_exists}|${details}"
+}
+
 # Test SSH connection (with password authentication)
 test_ssh_connection() {
     local host="$1"
@@ -383,6 +468,27 @@ exchange_ssh_keys() {
     local port="${4:-22}"  # Default to port 22 if not specified
     
     log_info "Starting SSH key exchange with ${username}@${host}:${port}..."
+    
+    # Check for duplicate connections before proceeding
+    log_info "Checking for existing SSH access..."
+    local duplicate_check=$(detect_duplicate_ssh_access "$host" "$username" "$port")
+    local registry_exists=$(echo "$duplicate_check" | cut -d'|' -f1)
+    local ssh_access_exists=$(echo "$duplicate_check" | cut -d'|' -f2)
+    local details=$(echo "$duplicate_check" | cut -d'|' -f3)
+    
+    # If any existing access is detected, return special response for frontend handling
+    if [[ "$registry_exists" == "true" ]] || [[ "$ssh_access_exists" == "true" ]]; then
+        log_info "⚠ Existing SSH access detected for ${username}@${host}:${port}"
+        if [[ -n "$details" ]]; then
+            log_info "Details: $details"
+        fi
+        
+        # Return special format that the frontend can detect and handle
+        echo "DUPLICATE_DETECTED|${host}|${username}|${port}|${registry_exists}|${ssh_access_exists}|${details}"
+        return 2  # Special exit code for duplicate detection
+    fi
+    
+    log_info "No existing access detected - proceeding with key exchange"
     
     # Generate unique connection ID
     local conn_id=$(generate_connection_id)

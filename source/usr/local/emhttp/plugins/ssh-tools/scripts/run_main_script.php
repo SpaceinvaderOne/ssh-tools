@@ -292,6 +292,17 @@ if (is_resource($process)) {
     
     if ($exitCode === 0) {
         echo $output;
+    } elseif ($exitCode === 2) {
+        // Handle duplicate detection (exit code 2)
+        $fullOutput = $output . ($error ? "\n" . $error : "");
+        
+        // Check if this is duplicate detection response
+        if (strpos($fullOutput, 'DUPLICATE_DETECTED|') !== false) {
+            echo $fullOutput;  // Pass through the duplicate detection response
+        } else {
+            // Fallback for other exit code 2 scenarios
+            echo "DUPLICATE_CHECK_ERROR: " . $fullOutput;
+        }
     } else {
         // Enhanced error handling for revocation operations
         $fullOutput = $output . ($error ? "\n" . $error : "");

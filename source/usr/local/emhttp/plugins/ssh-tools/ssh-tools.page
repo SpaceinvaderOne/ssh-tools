@@ -121,6 +121,42 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
 }
 
 /* SweetAlert is used for modals - provides automatic theme compatibility */
+
+/* Custom styling for duplicate detection modal */
+.btn-choice {
+  display: inline-block;
+  margin: 5px;
+  padding: 8px 16px;
+  background: #F15A2C;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+}
+
+.btn-choice:hover {
+  background: #d04a1c;
+}
+
+.btn-choice.btn-cancel {
+  background: #6c757d;
+}
+
+.btn-choice.btn-cancel:hover {
+  background: #5a6268;
+}
+
+.duplicate-detection-modal {
+  width: 500px !important;
+}
+
+.duplicate-detection-modal .sa-button-container {
+  text-align: center;
+  margin-top: 20px;
+}
 </style>
 
 <!-- Tab Navigation -->
@@ -440,6 +476,193 @@ function smartUpdateStatus(message) {
   updateStatus(message, type);
 }
 
+// Duplicate Detection and User Choice System
+function handleDuplicateDetection(response) {
+  // Parse the duplicate detection response: DUPLICATE_DETECTED|host|username|port|registry_exists|ssh_access_exists|details
+  const parts = response.split('|');
+  if (parts.length < 7) {
+    console.error('Invalid duplicate detection response format');
+    return;
+  }
+  
+  const host = parts[1];
+  const username = parts[2];
+  const port = parts[3];
+  const registryExists = parts[4] === 'true';
+  const sshAccessExists = parts[5] === 'true';
+  const details = parts[6] || '';
+  
+  // Format display hostname with port if non-standard
+  const displayHost = port && port != 22 ? host + ':' + port : host;
+  
+  showDuplicateConnectionModal(host, username, port, displayHost, registryExists, sshAccessExists, details);
+}
+
+function showDuplicateConnectionModal(host, username, port, displayHost, registryExists, sshAccessExists, details) {
+  let statusMessage = '';
+  let detailMessage = '';
+  
+  if (registryExists && sshAccessExists) {
+    statusMessage = 'SSH connection already exists and is tracked in your plugin registry.';
+    detailMessage = details ? '<br><small>Details: ' + details + '</small>' : '';
+  } else if (registryExists) {
+    statusMessage = 'Connection exists in your plugin registry, but SSH access test failed.';
+    detailMessage = '<br><small>The connection may be inactive or the remote server may be unreachable.</small>';
+  } else if (sshAccessExists) {
+    statusMessage = 'SSH key access already exists, but it\'s not tracked in your plugin registry.';
+    detailMessage = '<br><small>This could be from a manual key exchange or another tool.</small>';
+  }
+  
+  swal({
+    title: 'SSH Connection Already Exists',
+    html: '<strong>Target:</strong> ' + username + '@' + displayHost + '<br><br>' +
+          statusMessage + detailMessage + '<br><br>' +
+          '<strong>What would you like to do?</strong>',
+    type: 'warning',
+    showCancelButton: true,
+    showConfirmButton: false,
+    cancelButtonText: 'Cancel',
+    html: true,
+    customClass: 'duplicate-detection-modal',
+    showLoaderOnConfirm: false,
+    allowOutsideClick: false
+  });
+  
+  // Add custom buttons after modal is shown
+  setTimeout(function() {
+    const modal = document.querySelector('.sweet-alert.duplicate-detection-modal');
+    if (modal) {
+      // Remove default buttons
+      const buttonContainer = modal.querySelector('.sa-button-container');
+      if (buttonContainer) {
+        buttonContainer.innerHTML = '';
+        
+        // Add custom choice buttons
+        const buttonHtml = 
+          '<button class="btn-choice" onclick="handleDuplicateChoice(\'test\', \'' + host + '\', \'' + username + '\', \'' + port + '\')">Test Existing Connection</button>' +
+          '<button class="btn-choice" onclick="handleDuplicateChoice(\'use\', \'' + host + '\', \'' + username + '\', \'' + port + '\')">Use Existing Connection</button>' +
+          '<button class="btn-choice" onclick="handleDuplicateChoice(\'backup\', \'' + host + '\', \'' + username + '\', \'' + port + '\')">Add Backup Key</button>' +
+          '<button class="btn-choice" onclick="handleDuplicateChoice(\'replace\', \'' + host + '\', \'' + username + '\', \'' + port + '\')">Replace Existing Key</button>' +
+          '<button class="btn-choice btn-cancel" onclick="swal.close()">Cancel</button>';
+        
+        buttonContainer.innerHTML = buttonHtml;
+      }
+    }
+  }, 100);
+}
+
+function handleDuplicateChoice(choice, host, username, port) {
+  swal.close();
+  
+  const displayHost = port && port != 22 ? host + ':' + port : host;
+  
+  switch (choice) {
+    case 'test':
+      updateStatus('Testing existing connection to ' + displayHost + '...');
+      testSingleConnectionForDuplicate(host, username, port);
+      break;
+      
+    case 'use':
+      swal({
+        title: 'Using Existing Connection',
+        text: 'No changes made. Your existing SSH connection to ' + displayHost + ' will continue to work.',
+        type: 'info',
+        confirmButtonText: 'OK'
+      }, function() {
+        // Auto-navigate to Manage SSH Keys tab to show existing connections
+        showTab('manage');
+        refreshExchangedKeys();
+      });
+      break;
+      
+    case 'backup':
+      swal({
+        title: 'Add Backup Key?',
+        text: 'This will create an additional SSH key for ' + displayHost + '. You will have multiple keys that can access this server.',
+        type: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Add Backup Key',
+        cancelButtonText: 'Cancel'
+      }, function(isConfirm) {
+        if (isConfirm) {
+          forceDuplicateKeyExchange(host, username, port);
+        }
+      });
+      break;
+      
+    case 'replace':
+      swal({
+        title: 'Replace Existing Key?',
+        text: 'This will revoke your current SSH access and create a new key for ' + displayHost + '. The old key will stop working.',
+        type: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Replace Key',
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#d33'
+      }, function(isConfirm) {
+        if (isConfirm) {
+          replaceExistingKey(host, username, port);
+        }
+      });
+      break;
+  }
+}
+
+function testSingleConnectionForDuplicate(host, username, port) {
+  const testHost = port && port != 22 ? host + ':' + port : host;
+  executeOperation('test_single_connection', { 
+    host: testHost,
+    username: username 
+  }, function(response) {
+    if (response.toLowerCase().includes('successful')) {
+      swal({
+        title: 'Connection Test Successful',
+        text: 'Your existing SSH connection to ' + testHost + ' is working properly.',
+        type: 'success',
+        confirmButtonText: 'View Connections'
+      }, function() {
+        showTab('manage');
+        refreshExchangedKeys();
+      });
+    } else {
+      swal({
+        title: 'Connection Test Failed',
+        text: 'Your SSH connection to ' + testHost + ' is not working. You may want to create a new key.',
+        type: 'error',
+        showCancelButton: true,
+        confirmButtonText: 'Create New Key',
+        cancelButtonText: 'Cancel'
+      }, function(isConfirm) {
+        if (isConfirm) {
+          forceDuplicateKeyExchange(host, username, port);
+        }
+      });
+    }
+  });
+}
+
+function forceDuplicateKeyExchange(host, username, port) {
+  // This would need to be implemented to bypass duplicate detection
+  updateStatus('Creating additional SSH key for ' + host + '...');
+  swal({
+    title: 'Feature Coming Soon',
+    text: 'Force duplicate key creation is not yet implemented. Please use the "Replace Existing Key" option instead.',
+    type: 'info',
+    confirmButtonText: 'OK'
+  });
+}
+
+function replaceExistingKey(host, username, port) {
+  // This would need to be implemented to revoke existing keys first
+  updateStatus('Replacing SSH key for ' + host + '...');
+  swal({
+    title: 'Feature Coming Soon',
+    text: 'Key replacement is not yet implemented. Please manually revoke the existing key first.',
+    type: 'info',
+    confirmButtonText: 'OK'
+  });
+}
+
 // SSH Key Management Functions
 function checkKeyStatus() {
   updateStatus('Checking SSH key status...');
@@ -518,8 +741,12 @@ function performSSHKeyExchange() {
     setButtonLoading('exchangeBtn', false);
     smartUpdateStatus(response);
     
+    // Check for duplicate detection response
+    if (response.includes('DUPLICATE_DETECTED|')) {
+      handleDuplicateDetection(response);
+    }
     // Show success modal and auto-navigate
-    if (response.toLowerCase().includes('successfully')) {
+    else if (response.toLowerCase().includes('successfully')) {
       swal({
         title: 'Success!',
         text: 'SSH keys have been successfully exchanged with ' + displayHost,
