@@ -1316,10 +1316,71 @@ process_operation() {
                 error_exit "Invalid revoke type: $REVOKE_TYPE"
             fi
             ;;
+        "add_external_connection")
+            if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USERNAME" ]]; then
+                error_exit "Missing required parameters for adding external connection"
+            fi
+            add_external_connection_to_registry "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PORT"
+            ;;
         *)
             error_exit "Unknown operation: $operation"
             ;;
     esac
+}
+
+# Add external SSH connection to registry (for pre-existing SSH access)
+add_external_connection_to_registry() {
+    local host="$1"
+    local username="$2"
+    local port="${3:-22}"
+    
+    log_info "Adding external SSH connection to registry: ${username}@${host}:${port}"
+    
+    # Verify that SSH access actually works before adding to registry
+    if ! ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${username}@${host}" true 2>/dev/null; then
+        echo "ERROR: Cannot verify SSH access to ${username}@${host}:${port}"
+        echo "SSH connection test failed - cannot add non-working connection to registry"
+        return 1
+    fi
+    
+    log_info "SSH access verified - proceeding with registry update"
+    
+    # Generate connection ID for external connection
+    local conn_id="ext-$(date +%Y%m%d%H%M%S)-$$"
+    log_info "Generated external connection ID: $conn_id"
+    
+    # Create registry entry for external connection
+    # Format: connection_id, timestamp, username@host:port, key_type, key_path, status
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local connection_entry="{\"id\":\"$conn_id\",\"timestamp\":\"$timestamp\",\"username\":\"$username\",\"hostname\":\"$host\",\"port\":\"$port\",\"key_type\":\"external\",\"key_path\":\"N/A\",\"status\":\"active\"}"
+    
+    # Initialize registry if it doesn't exist
+    if [[ ! -f "$REGISTRY_FILE" ]]; then
+        echo "[]" > "$REGISTRY_FILE"
+        log_info "Created new registry file: $REGISTRY_FILE"
+    fi
+    
+    # Add connection using jq
+    if command -v jq >/dev/null 2>&1; then
+        local temp_file="${REGISTRY_FILE}.tmp"
+        if jq ". += [$connection_entry]" "$REGISTRY_FILE" > "$temp_file" 2>/dev/null; then
+            mv "$temp_file" "$REGISTRY_FILE"
+            log_info "Successfully added external connection to registry"
+            echo "Successfully added external SSH connection to tracking registry"
+            echo "Connection: ${username}@${host}:${port} (External Key)"
+            return 0
+        else
+            rm -f "$temp_file" 2>/dev/null || true
+            log_info "jq failed, falling back to simple registry format"
+        fi
+    fi
+    
+    # Fallback to simple text format if jq fails
+    echo "$(date '+%Y-%m-%d %H:%M:%S') ${username}@${host}:${port} (External)" >> "$EXCHANGED_KEYS_FILE"
+    log_info "Added external connection to simple registry format"
+    echo "Successfully added external SSH connection to tracking registry"
+    echo "Connection: ${username}@${host}:${port} (External Key)"
+    return 0
 }
 
 # Main execution
