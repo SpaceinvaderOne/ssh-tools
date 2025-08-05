@@ -137,6 +137,11 @@ switch ($operation) {
             // Default to port 22 if not specified
             $env['REMOTE_PORT'] = 22;
         }
+        
+        // Check for force duplicate flag
+        if (isset($_POST['force_duplicate']) && $_POST['force_duplicate'] === 'true') {
+            $env['FORCE_DUPLICATE'] = 'true';
+        }
         break;
         
     case 'test_single_connection':

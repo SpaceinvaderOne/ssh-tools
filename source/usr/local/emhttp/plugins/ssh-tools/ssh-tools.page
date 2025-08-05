@@ -642,25 +642,282 @@ function testSingleConnectionForDuplicate(host, username, port) {
 }
 
 function forceDuplicateKeyExchange(host, username, port) {
-  // This would need to be implemented to bypass duplicate detection
-  updateStatus('Creating additional SSH key for ' + host + '...');
+  const displayHost = port && port != 22 ? host + ':' + port : host;
+  const password = document.getElementById('remotePassword').value;
+  
+  if (!password) {
+    swal({
+      title: 'Password Required',
+      text: 'Please enter the password for ' + displayHost + ' to create the backup key.',
+      type: 'error',
+      confirmButtonText: 'OK'
+    });
+    return;
+  }
+  
+  // Show progress modal
   swal({
-    title: 'Feature Coming Soon',
-    text: 'Force duplicate key creation is not yet implemented. Please use the "Replace Existing Key" option instead.',
+    title: 'Creating Backup SSH Key',
+    text: 'Creating additional SSH key for ' + displayHost + '...',
     type: 'info',
-    confirmButtonText: 'OK'
+    showConfirmButton: false,
+    allowOutsideClick: false
+  });
+  
+  // Force exchange by bypassing duplicate detection
+  // This will create a second PAIR- key for the same server
+  executeOperation('exchange_keys', {
+    host: host,
+    username: username,
+    password: password,
+    port: port,
+    force_duplicate: true  // Add flag to bypass duplicate detection
+  }, function(response) {
+    if (response.toLowerCase().includes('successfully')) {
+      swal({
+        title: 'Backup Key Created!',
+        html: 'Successfully created backup SSH key for <strong>' + displayHost + '</strong>:<br><br>' +
+              '• You now have multiple SSH keys for this server<br>' +
+              '• Both keys can be used for SSH access<br>' +
+              '• You can manage both keys from the "Manage SSH Keys" tab',
+        type: 'success',
+        confirmButtonText: 'View Keys'
+      }, function() {
+        showTab('manage');
+        refreshExchangedKeys();
+      });
+    } else {
+      swal({
+        title: 'Backup Key Creation Failed',
+        text: 'Failed to create backup key: ' + response,
+        type: 'error',
+        confirmButtonText: 'OK'
+      });
+    }
+  }, function(error) {
+    swal({
+      title: 'Backup Key Creation Failed',
+      text: 'Error creating backup key: ' + error,
+      type: 'error',
+      confirmButtonText: 'OK'
+    });
   });
 }
 
 function replaceExistingKey(host, username, port) {
-  // This would need to be implemented to revoke existing keys first
-  updateStatus('Replacing SSH key for ' + host + '...');
+  const displayHost = port && port != 22 ? host + ':' + port : host;
+  
+  // First show a confirmation modal 
   swal({
-    title: 'Feature Coming Soon',
-    text: 'Key replacement is not yet implemented. Please manually revoke the existing key first.',
-    type: 'info',
-    confirmButtonText: 'OK'
+    title: 'Replace SSH Key for ' + displayHost,
+    html: 'This will:<br><br>' +
+          '• Find and revoke your existing SSH key<br>' +
+          '• Create a new SSH key pair<br>' +
+          '• Exchange the new key with the server<br><br>' +
+          '<strong>The old key will stop working immediately.</strong>',
+    type: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Replace Key',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: '#d33'
+  }, function(isConfirm) {
+    if (isConfirm) {
+      performKeyReplacement(host, username, port);
+    }
   });
+}
+
+function performKeyReplacement(host, username, port) {
+  const displayHost = port && port != 22 ? host + ':' + port : host;
+  
+  // Show progress modal
+  swal({
+    title: 'Replacing SSH Key',
+    text: 'Step 1: Finding existing connection to ' + displayHost + '...',
+    type: 'info',
+    showConfirmButton: false,
+    allowOutsideClick: false
+  });
+  
+  // First, find existing connections to this server
+  executeOperation('list_exchanged_keys', {}, function(response) {
+    const connections = parseExchangedKeysResponse(response);
+    const existingConnection = connections.find(conn => 
+      conn.hostname === host && 
+      conn.username === username && 
+      conn.port === port
+    );
+    
+    if (existingConnection) {
+      // Update progress
+      swal({
+        title: 'Replacing SSH Key',
+        text: 'Step 2: Revoking existing key for ' + displayHost + '...',
+        type: 'info',
+        showConfirmButton: false,
+        allowOutsideClick: false
+      });
+      
+      // Revoke the existing key first
+      executeOperation('revoke_exchanged_key', {
+        connection_id: existingConnection.id,
+        revoke_type: 'full',
+        host: host,
+        username: username,
+        port: port
+      }, function(revokeResponse) {
+        if (revokeResponse.toLowerCase().includes('successfully')) {
+          // Update progress  
+          swal({
+            title: 'Replacing SSH Key',
+            text: 'Step 3: Creating new key and exchanging with ' + displayHost + '...',
+            type: 'info',
+            showConfirmButton: false,
+            allowOutsideClick: false
+          });
+          
+          // Now perform the new key exchange
+          const password = document.getElementById('remotePassword').value;
+          if (!password) {
+            swal({
+              title: 'Password Required',
+              text: 'Please enter the password for ' + displayHost + ' to complete the key replacement.',
+              type: 'error',
+              confirmButtonText: 'OK'
+            });
+            return;
+          }
+          
+          executeOperation('exchange_keys', {
+            host: host,
+            username: username,
+            password: password,
+            port: port
+          }, function(exchangeResponse) {
+            if (exchangeResponse.toLowerCase().includes('successfully')) {
+              swal({
+                title: 'Key Replacement Successful!',
+                html: 'Successfully replaced SSH key for <strong>' + displayHost + '</strong>:<br><br>' +
+                      '• Old key revoked and removed<br>' +
+                      '• New key created and exchanged<br>' +
+                      '• Connection is ready to use',
+                type: 'success',
+                confirmButtonText: 'View Connections'
+              }, function() {
+                showTab('manage');
+                refreshExchangedKeys();
+              });
+            } else {
+              swal({
+                title: 'Key Exchange Failed',
+                html: 'The old key was revoked but the new key exchange failed:<br><br>' +
+                      exchangeResponse + '<br><br>' +
+                      'You may need to manually set up SSH access to ' + displayHost,
+                type: 'error',
+                confirmButtonText: 'OK'
+              });
+            }
+          }, function(error) {
+            swal({
+              title: 'Key Exchange Failed',
+              text: 'The old key was revoked but failed to create new key: ' + error,
+              type: 'error',
+              confirmButtonText: 'OK'
+            });
+          });
+        } else {
+          swal({
+            title: 'Key Revocation Failed',
+            text: 'Could not revoke existing key: ' + revokeResponse,
+            type: 'error',
+            confirmButtonText: 'OK'
+          });
+        }
+      }, function(error) {
+        swal({
+          title: 'Key Revocation Failed',
+          text: 'Error revoking existing key: ' + error,
+          type: 'error',
+          confirmButtonText: 'OK'
+        });
+      });
+    } else {
+      // No existing connection found, just do normal exchange
+      swal({
+        title: 'No Existing Connection Found',
+        text: 'Could not find an existing SSH connection to ' + displayHost + '. Would you like to create a new connection instead?',
+        type: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Create New',
+        cancelButtonText: 'Cancel'
+      }, function(isConfirm) {
+        if (isConfirm) {
+          // Just do normal key exchange
+          const password = document.getElementById('remotePassword').value;
+          if (password) {
+            exchangeSSHKeys();
+          } else {
+            swal({
+              title: 'Password Required',
+              text: 'Please enter the password to create the SSH connection.',
+              type: 'error',
+              confirmButtonText: 'OK'
+            });
+          }
+        }
+      });
+    }
+  }, function(error) {
+    swal({
+      title: 'Connection Lookup Failed',
+      text: 'Could not retrieve existing connections: ' + error,
+      type: 'error',
+      confirmButtonText: 'OK'
+    });
+  });
+}
+
+// Helper function to parse exchanged keys response into structured data
+function parseExchangedKeysResponse(response) {
+  const connections = [];
+  const lines = response.trim().split('\n');
+  
+  for (const line of lines) {
+    if (line.trim() && !line.startsWith('<') && line.includes('@')) {
+      // Parse connection line format: "conn-id: timestamp username@hostname:port [status]"
+      const parts = line.trim().split(' ');
+      if (parts.length >= 3) {
+        const connId = parts[0].replace(':', '');
+        const userHostPort = parts[2];
+        
+        if (userHostPort.includes('@')) {
+          const atIndex = userHostPort.lastIndexOf('@');
+          const username = userHostPort.substring(0, atIndex);
+          const hostPort = userHostPort.substring(atIndex + 1);
+          
+          let hostname, port;
+          if (hostPort.includes(':')) {
+            const colonIndex = hostPort.lastIndexOf(':');
+            hostname = hostPort.substring(0, colonIndex);
+            port = hostPort.substring(colonIndex + 1);
+          } else {
+            hostname = hostPort;
+            port = '22';
+          }
+          
+          connections.push({
+            id: connId,
+            username: username,
+            hostname: hostname,
+            port: port,
+            line: line
+          });
+        }
+      }
+    }
+  }
+  
+  return connections;
 }
 
 // SSH Key Management Functions
