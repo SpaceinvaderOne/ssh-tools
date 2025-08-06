@@ -365,6 +365,31 @@ check_existing_connection_in_registry() {
     fi
 }
 
+# Find the SSH key path for an existing connection in the registry
+find_connection_key_path() {
+    local host="$1"
+    local username="$2"
+    local port="$3"
+    
+    if [[ ! -f "$CONNECTIONS_REGISTRY" ]] || ! command -v jq >/dev/null 2>&1; then
+        echo "null"
+        return 1
+    fi
+    
+    # Look up the private key path for this connection
+    local key_path=$(jq -r --arg host "$host" --arg username "$username" --arg port "$port" \
+        '.connections[] | select(.host == $host and .username == $username and (.port | tostring) == $port) | .private_key' \
+        "$CONNECTIONS_REGISTRY" 2>/dev/null)
+    
+    if [[ -n "$key_path" ]] && [[ "$key_path" != "null" ]]; then
+        echo "$key_path"
+        return 0
+    else
+        echo "null"
+        return 1
+    fi
+}
+
 # Test if we already have SSH key access to the target server
 test_existing_ssh_key_access() {
     local host="$1"
@@ -437,15 +462,24 @@ detect_duplicate_ssh_access() {
     local username="$2"
     local port="$3"
     
+    log_info "🔍 Starting duplicate detection for ${username}@${host}:${port}"
+    
     local registry_exists=$(check_existing_connection_in_registry "$host" "$username" "$port")
+    log_info "🔍 Registry check result: $registry_exists"
+    
     local ssh_access_exists=$(test_existing_ssh_key_access "$host" "$username" "$port")
+    log_info "🔍 SSH access check result: $ssh_access_exists"
     
     # Return results in format: "registry_status|ssh_status|details"
     local details=""
     if [[ "$registry_exists" == "true" ]]; then
         details=$(get_existing_connection_details "$host" "$username" "$port")
+        log_info "🔍 Found existing registry entry: $details"
     elif [[ "$ssh_access_exists" == "true" ]]; then
         details="SSH access exists (not tracked in registry)"
+        log_info "🔍 SSH access exists but not tracked in registry"
+    else
+        log_info "🔍 No existing access detected"
     fi
     
     echo "${registry_exists}|${ssh_access_exists}|${details}"
