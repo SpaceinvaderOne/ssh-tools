@@ -401,20 +401,13 @@ test_existing_ssh_key_access() {
     
     # Test with individual key if available
     if [[ -n "$found_connection" ]] && [[ "$found_connection" != "null" ]] && [[ -f "$found_connection" ]]; then
-        log_info "Testing SSH access with individual key: $found_connection"
-        
         # Add known_hosts entry to prevent SSH issues (fix from old script)
         ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
         
         if ssh -i "$found_connection" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${username}@${host}" true 2>/dev/null; then
-            log_info "SSH access test successful with individual key"
             echo "true"
             return 0
-        else
-            log_info "SSH access test failed with individual key"
         fi
-    else
-        log_info "No individual key found, testing with any available SSH keys"
     fi
     
     # Fallback: Test SSH connectivity using any available keys (BatchMode prevents password prompts)
@@ -422,11 +415,9 @@ test_existing_ssh_key_access() {
     ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
     
     if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${username}@${host}" true 2>/dev/null; then
-        log_info "SSH access test successful with general key detection"
         echo "true"
         return 0
     else
-        log_info "SSH access test failed - no working SSH key found"
         echo "false"
         return 1
     fi
@@ -462,24 +453,15 @@ detect_duplicate_ssh_access() {
     local username="$2"
     local port="$3"
     
-    log_info "🔍 Starting duplicate detection for ${username}@${host}:${port}"
-    
     local registry_exists=$(check_existing_connection_in_registry "$host" "$username" "$port")
-    log_info "🔍 Registry check result: $registry_exists"
-    
     local ssh_access_exists=$(test_existing_ssh_key_access "$host" "$username" "$port")
-    log_info "🔍 SSH access check result: $ssh_access_exists"
     
     # Return results in format: "registry_status|ssh_status|details"
     local details=""
     if [[ "$registry_exists" == "true" ]]; then
         details=$(get_existing_connection_details "$host" "$username" "$port")
-        log_info "🔍 Found existing registry entry: $details"
     elif [[ "$ssh_access_exists" == "true" ]]; then
         details="SSH access exists (not tracked in registry)"
-        log_info "🔍 SSH access exists but not tracked in registry"
-    else
-        log_info "🔍 No existing access detected"
     fi
     
     echo "${registry_exists}|${ssh_access_exists}|${details}"
