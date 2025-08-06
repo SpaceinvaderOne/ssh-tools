@@ -456,15 +456,22 @@ detect_duplicate_ssh_access() {
     local registry_exists=$(check_existing_connection_in_registry "$host" "$username" "$port")
     local ssh_access_exists=$(test_existing_ssh_key_access "$host" "$username" "$port")
     
-    # Return results in format: "registry_status|ssh_status|details"
+    # Return results in format: "registry_status|ssh_status|details|is_stale"
     local details=""
+    local is_stale="false"
+    
     if [[ "$registry_exists" == "true" ]]; then
         details=$(get_existing_connection_details "$host" "$username" "$port")
+        # Check if this is a stale entry (in registry but SSH doesn't work)
+        if [[ "$ssh_access_exists" == "false" ]]; then
+            is_stale="true"
+            details="$details (STALE - SSH access lost)"
+        fi
     elif [[ "$ssh_access_exists" == "true" ]]; then
         details="SSH access exists (not tracked in registry)"
     fi
     
-    echo "${registry_exists}|${ssh_access_exists}|${details}"
+    echo "${registry_exists}|${ssh_access_exists}|${details}|${is_stale}"
 }
 
 # Test SSH connection (with password authentication)
@@ -502,6 +509,67 @@ test_ssh_connection() {
     fi
 }
 
+# Cleanup stale connection entries and associated SSH keys
+cleanup_stale_connection() {
+    local host="$1"
+    local username="$2"
+    local port="$3"
+    
+    log_info "🧹 Cleaning up stale connection for ${username}@${host}:${port}..."
+    
+    # First, find the connection details before removing
+    local connection_details=""
+    local private_key_path=""
+    
+    if [[ -f "$CONNECTIONS_REGISTRY" ]] && command -v jq >/dev/null 2>&1; then
+        # Get connection details for logging
+        connection_details=$(jq -r --arg host "$host" --arg username "$username" --arg port "$port" \
+            '.connections[] | select(.host == $host and .username == $username and (.port | tostring) == $port) | 
+             "ID: " + .id + ", Created: " + .created' \
+            "$CONNECTIONS_REGISTRY" 2>/dev/null)
+            
+        # Get private key path for cleanup
+        private_key_path=$(jq -r --arg host "$host" --arg username "$username" --arg port "$port" \
+            '.connections[] | select(.host == $host and .username == $username and (.port | tostring) == $port) | .private_key' \
+            "$CONNECTIONS_REGISTRY" 2>/dev/null)
+    fi
+    
+    if [[ -z "$connection_details" ]]; then
+        log_info "⚠ No stale connection found to clean up"
+        return 1
+    fi
+    
+    log_info "🗑 Removing stale registry entry: $connection_details"
+    
+    # Remove from JSON registry
+    if [[ -f "$CONNECTIONS_REGISTRY" ]] && command -v jq >/dev/null 2>&1; then
+        local temp_registry=$(mktemp)
+        jq --arg host "$host" --arg username "$username" --arg port "$port" \
+            'del(.connections[] | select(.host == $host and .username == $username and (.port | tostring) == $port))' \
+            "$CONNECTIONS_REGISTRY" > "$temp_registry" 2>/dev/null
+            
+        if [[ $? -eq 0 ]]; then
+            mv "$temp_registry" "$CONNECTIONS_REGISTRY"
+            log_info "✅ Removed stale entry from registry"
+        else
+            rm -f "$temp_registry" 2>/dev/null
+            log_info "❌ Failed to remove entry from registry"
+            return 1
+        fi
+    fi
+    
+    # Remove associated SSH key files
+    if [[ -n "$private_key_path" ]] && [[ -f "$private_key_path" ]]; then
+        log_info "🔑 Removing orphaned SSH key: $(basename "$private_key_path")"
+        rm -f "$private_key_path" 2>/dev/null || true
+        rm -f "${private_key_path}.pub" 2>/dev/null || true
+        log_info "✅ Orphaned SSH key files removed"
+    fi
+    
+    log_info "🎯 Stale connection cleanup completed successfully"
+    return 0
+}
+
 # Exchange SSH keys with remote host using individual key pairs
 exchange_ssh_keys() {
     local host="$1"
@@ -521,14 +589,28 @@ exchange_ssh_keys() {
         local registry_exists=$(echo "$duplicate_check" | cut -d'|' -f1)
         local ssh_access_exists=$(echo "$duplicate_check" | cut -d'|' -f2)
         local details=$(echo "$duplicate_check" | cut -d'|' -f3)
+        local is_stale=$(echo "$duplicate_check" | cut -d'|' -f4)
         
-        log_info "🔍 Duplicate detection results: registry=$registry_exists, ssh=$ssh_access_exists"
+        log_info "🔍 Duplicate detection results: registry=$registry_exists, ssh=$ssh_access_exists, stale=$is_stale"
         
-        # If any existing access is detected, return special response for frontend handling
-        if [[ "$registry_exists" == "true" ]] || [[ "$ssh_access_exists" == "true" ]]; then
-            log_info "⚠ Existing SSH access detected for ${username}@${host}:${port}"
+        # Handle stale entries - cleanup and proceed with new key exchange
+        if [[ "$is_stale" == "true" ]]; then
+            log_info "🔄 Detected stale connection entry - initiating self-healing cleanup"
             if [[ -n "$details" ]]; then
-                log_info "🔍 Access details: $details"
+                log_info "🔍 Stale entry details: $details"
+            fi
+            
+            # Cleanup stale entry and proceed with key exchange
+            if cleanup_stale_connection "$host" "$username" "$port"; then
+                log_info "✨ Self-healing completed - proceeding with fresh key exchange"
+            else
+                log_info "❌ Self-healing failed - but proceeding with key exchange anyway"
+            fi
+        elif [[ "$registry_exists" == "true" ]] || [[ "$ssh_access_exists" == "true" ]]; then
+            # True duplicate - both registry and SSH access exist
+            log_info "⚠ Active SSH connection detected for ${username}@${host}:${port}"
+            if [[ -n "$details" ]]; then
+                log_info "🔍 Connection details: $details"
             fi
             
             # Return special format that the frontend can detect and handle
