@@ -492,24 +492,102 @@ test_ssh_connection() {
         return 1
     fi
     
-    # Use sshpass for password authentication (installed as dependency)
-    # Try with explicit port format and additional SSH options for non-standard ports
-    if sshpass -p "$password" ssh -p "$port" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=no -o UserKnownHostsFile=/dev/null "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
+    # Enhanced SSH options for reliable password authentication with sshpass
+    local ssh_opts=(
+        -p "$port"
+        -o ConnectTimeout=10
+        -o StrictHostKeyChecking=no
+        -o UserKnownHostsFile=/dev/null
+        -o PreferredAuthentications=password
+        -o PubkeyAuthentication=no
+        -o PasswordAuthentication=yes
+        -o BatchMode=yes
+        -o LogLevel=ERROR
+    )
+    
+    log_info "Attempting password authentication to ${username}@${host}:${port}..."
+    
+    # Primary connection test with optimized SSH options
+    if sshpass -p "$password" ssh "${ssh_opts[@]}" "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
         log_info "Connection test to ${username}@${host}:${port} succeeded"
         return 0
-    else
-        # Try alternative SSH syntax for troubleshooting
-        log_info "Primary connection failed, testing with verbose output..."
-        debug_log "Attempting connection with debug info..."
-        
-        # Capture error output for debugging
-        local ssh_error
-        ssh_error=$(sshpass -p "$password" ssh -v -p "$port" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=no -o UserKnownHostsFile=/dev/null "${username}@${host}" "echo 'test'" 2>&1 | head -10)
-        debug_log "SSH debug output: $ssh_error"
-        
-        log_info "Connection test to ${username}@${host}:${port} failed - check credentials and SSH service"
+    fi
+    
+    # Enhanced debugging for connection failures
+    log_info "Primary connection failed, running detailed diagnostics..."
+    
+    # Test 1: Check if sshpass is working
+    if ! command -v sshpass >/dev/null 2>&1; then
+        log_info "ERROR: sshpass command not found - password authentication unavailable"
         return 1
     fi
+    
+    # Test 2: Try with verbose output to understand failure mode
+    local ssh_debug_output
+    ssh_debug_output=$(sshpass -p "$password" ssh -v "${ssh_opts[@]}" "${username}@${host}" "echo 'debug test'" 2>&1)
+    local ssh_exit_code=$?
+    
+    # Analyze the failure
+    if echo "$ssh_debug_output" | grep -q "Connection refused"; then
+        log_info "Connection refused - SSH service may not be running on port ${port}"
+        return 1
+    elif echo "$ssh_debug_output" | grep -q "Permission denied"; then
+        log_info "Permission denied - incorrect username or password"
+        return 1
+    elif echo "$ssh_debug_output" | grep -q "Connection timed out"; then
+        log_info "Connection timed out - host may be unreachable or firewall blocking"
+        return 1
+    elif echo "$ssh_debug_output" | grep -q "No route to host"; then
+        log_info "No route to host - network routing issue"
+        return 1
+    else
+        # Generic failure with debug output
+        log_info "SSH connection failed (exit code: $ssh_exit_code)"
+        debug_log "SSH debug output: $(echo "$ssh_debug_output" | head -10)"
+    fi
+    
+    # Test 3: Fallback with even simpler SSH options (last resort)
+    log_info "Attempting fallback connection test with minimal options..."
+    if sshpass -p "$password" ssh -p "$port" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password "${username}@${host}" "true" >/dev/null 2>&1; then
+        log_info "Fallback connection test succeeded - primary test may have option conflicts"
+        return 0
+    fi
+    
+    log_info "All connection tests failed - check credentials, network connectivity, and SSH service"
+    return 1
+}
+
+# SSH connection test with retry logic for transient issues
+test_ssh_connection_with_retry() {
+    local host="$1"
+    local username="$2"
+    local password="$3"
+    local port="${4:-22}"
+    local max_attempts="${5:-3}"  # Default to 3 attempts
+    local retry_delay="${6:-2}"   # Default to 2 seconds between retries
+    
+    log_info "Starting SSH connection test with retry logic (max attempts: $max_attempts)..."
+    
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+        log_info "Connection attempt $attempt of $max_attempts..."
+        
+        if test_ssh_connection "$host" "$username" "$password" "$port"; then
+            if [[ $attempt -gt 1 ]]; then
+                log_info "Connection succeeded on attempt $attempt (transient issue resolved)"
+            fi
+            return 0
+        fi
+        
+        # If this wasn't the last attempt, wait before retrying
+        if [[ $attempt -lt $max_attempts ]]; then
+            log_info "Attempt $attempt failed, waiting ${retry_delay}s before retry..."
+            sleep "$retry_delay"
+        else
+            log_info "All $max_attempts connection attempts failed"
+        fi
+    done
+    
+    return 1
 }
 
 # Cleanup stale connection entries and associated SSH keys
@@ -637,8 +715,8 @@ exchange_ssh_keys() {
     log_info "Generated individual SSH key: $key_name"
     log_info "Using individual SSH key: $public_key"
     
-    # Test connection first with password
-    if ! test_ssh_connection "$host" "$username" "$password" "$port"; then
+    # Test connection first with password (with retry logic for reliability)
+    if ! test_ssh_connection_with_retry "$host" "$username" "$password" "$port" 3 2; then
         # Clean up generated key on connection failure
         rm -f "$private_key" "$public_key" 2>/dev/null || true
         error_exit "Cannot connect to ${username}@${host}:${port} with provided credentials"
@@ -1391,7 +1469,7 @@ process_operation() {
             if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USERNAME" ]] || [[ -z "$REMOTE_PASSWORD" ]]; then
                 error_exit "Missing required parameters for connection test"
             fi
-            test_ssh_connection "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PASSWORD" "$REMOTE_PORT"
+            test_ssh_connection_with_retry "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PASSWORD" "$REMOTE_PORT" 2 1
             ;;
         "exchange_keys")
             if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USERNAME" ]] || [[ -z "$REMOTE_PASSWORD" ]]; then

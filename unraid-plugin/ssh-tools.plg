@@ -2,10 +2,10 @@
 <!DOCTYPE PLUGIN [
 <!ENTITY name                 "ssh-tools">
 <!ENTITY author               "SpaceInvaderOne">
-<!ENTITY plugin_version       "2025.08.06.2047">
+<!ENTITY plugin_version       "2025.08.06.2210">
 <!ENTITY launch_page          "Settings/&name;">
-<!ENTITY plugin_url           "https://github.com/SpaceinvaderOne/ssh-tools/raw/main/packages/pluginmain/ssh-tools-2025.08.06.2047-x86_64.txz">
-<!ENTITY plugin_md5           "784c6893b048187e5768b0f10eff4682">
+<!ENTITY plugin_url           "https://github.com/SpaceinvaderOne/ssh-tools/raw/main/packages/pluginmain/ssh-tools-2025.08.06.2210-x86_64.txz">
+<!ENTITY plugin_md5           "6b710800b2a4c1aa2d522fa82041a344">
 ]>
 
 <PLUGIN name="&name;" author="&author;" version="&plugin_version;" min="6.9.0" launch="&launch_page;" icon="gear">
