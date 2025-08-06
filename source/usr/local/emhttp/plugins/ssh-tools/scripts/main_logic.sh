@@ -531,20 +531,22 @@ exchange_ssh_keys() {
     
     # Check for force duplicate flag - if set, skip duplicate detection
     if [[ "$FORCE_DUPLICATE" == "true" ]]; then
-        log_info "Force duplicate flag set - bypassing duplicate detection"
+        log_info "🔧 Force duplicate flag set - bypassing duplicate detection"
     else
-        # Check for duplicate connections before proceeding
-        log_info "Checking for existing SSH access..."
+        # Check for duplicate connections using enhanced detection system
+        log_info "🔍 Initiating duplicate detection for ${username}@${host}:${port}..."
         local duplicate_check=$(detect_duplicate_ssh_access "$host" "$username" "$port")
         local registry_exists=$(echo "$duplicate_check" | cut -d'|' -f1)
         local ssh_access_exists=$(echo "$duplicate_check" | cut -d'|' -f2)
         local details=$(echo "$duplicate_check" | cut -d'|' -f3)
         
+        log_info "🔍 Duplicate detection results: registry=$registry_exists, ssh=$ssh_access_exists"
+        
         # If any existing access is detected, return special response for frontend handling
         if [[ "$registry_exists" == "true" ]] || [[ "$ssh_access_exists" == "true" ]]; then
             log_info "⚠ Existing SSH access detected for ${username}@${host}:${port}"
             if [[ -n "$details" ]]; then
-                log_info "Details: $details"
+                log_info "🔍 Access details: $details"
             fi
             
             # Return special format that the frontend can detect and handle
@@ -552,7 +554,7 @@ exchange_ssh_keys() {
             return 2  # Special exit code for duplicate detection
         fi
         
-        log_info "No existing access detected - proceeding with key exchange"
+        log_info "✅ No existing SSH access detected - proceeding with key exchange"
     fi
     
     # Generate unique connection ID
