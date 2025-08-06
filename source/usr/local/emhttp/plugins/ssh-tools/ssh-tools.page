@@ -528,22 +528,18 @@ function handleExistingSSHConnection(host, username, port, displayHost, registry
     // Add to registry by calling the backend
     addExistingConnectionToRegistry(host, username, port, displayHost);
   } else if (registryExists) {
-    // In registry but SSH doesn't work - connection may be broken
+    // In registry but SSH doesn't work - automatically fix broken connection
     swal({
-      title: 'Connection Issue Detected',
-      html: '⚠️ Connection to <strong>' + displayHost + '</strong> is tracked but not working.<br><br>' +
-            'The SSH key may have been removed or the server may be offline.<br>' +
-            'Would you like to create a new SSH key?',
-      type: 'warning',
-      showCancelButton: true,
-      confirmButtonText: 'Create New Key',
-      cancelButtonText: 'Cancel'
-    }, function(isConfirm) {
-      if (isConfirm) {
-        // Proceed with normal key exchange
-        proceedWithKeyExchange();
-      }
+      title: 'Updating Broken Connection',
+      html: '🔄 Connection to <strong>' + displayHost + '</strong> exists but is not working.<br><br>' +
+            'Cleaning up old entry and creating fresh SSH key...',
+      type: 'info',
+      showConfirmButton: false,
+      allowOutsideClick: false
     });
+    
+    // Automatically clean up broken entry and proceed with key exchange
+    cleanupBrokenConnectionAndProceed(host, username, port, displayHost, details);
   }
 }
 
@@ -575,7 +571,7 @@ function addExistingConnectionToRegistry(host, username, port, displayHost) {
   });
 }
 
-// Helper function to proceed with normal key exchange
+// Helper function to proceed with normal key exchange (bypass duplicate detection)
 function proceedWithKeyExchange() {
   const host = document.getElementById('remoteHost').value;
   const username = document.getElementById('remoteUsername').value;
@@ -592,13 +588,108 @@ function proceedWithKeyExchange() {
     return;
   }
   
-  // Call the main exchange function
-  exchangeSSHKeys();
+  // Call backend directly with force flag to bypass duplicate detection
+  const displayHost = port && port != 22 ? host + ':' + port : host;
+  
+  executeOperation('exchange_keys', {
+    host: host,
+    username: username,
+    password: password,
+    port: port,
+    force_duplicate: true  // Bypass duplicate detection
+  }, function(response) {
+    // Success - close any modal and show success
+    swal.close();
+    
+    if (response.toLowerCase().includes('successfully')) {
+      swal({
+        title: 'SSH Key Created Successfully!',
+        html: '✅ Successfully created SSH key for <strong>' + displayHost + '</strong><br><br>' +
+              'SSH access is now configured and ready to use.',
+        type: 'success',
+        confirmButtonText: 'View Connections'
+      }, function() {
+        showTab('manage');
+        refreshExchangedKeys();
+      });
+    } else {
+      swal({
+        title: 'Key Exchange Failed',
+        text: 'Failed to create SSH key: ' + response,
+        type: 'error',
+        confirmButtonText: 'OK'
+      });
+    }
+  }, function(error) {
+    // Error
+    swal.close();
+    swal({
+      title: 'Key Exchange Failed',
+      text: 'Error creating SSH key: ' + error,
+      type: 'error',
+      confirmButtonText: 'OK'
+    });
+  });
 }
 
 // Removed complex duplicate handling functions - using simplified approach
 
-// Complex functions removed - using simplified approach for better reliability
+// Helper function to cleanup broken connection and proceed with key exchange
+function cleanupBrokenConnectionAndProceed(host, username, port, displayHost, details) {
+  // Extract connection ID from details (format: "ID: conn-20250805202442-362251")
+  let connectionId = '';
+  if (details && details.includes('ID: ')) {
+    connectionId = details.replace('ID: ', '').trim();
+  }
+  
+  if (!connectionId) {
+    // If we can't extract connection ID, proceed anyway with key exchange
+    swal({
+      title: 'Creating New SSH Key',
+      html: 'Unable to cleanup old entry, but proceeding to create fresh SSH key for <strong>' + displayHost + '</strong>...',
+      type: 'info',
+      showConfirmButton: false,
+      allowOutsideClick: false
+    });
+    
+    setTimeout(function() {
+      proceedWithKeyExchange();
+    }, 2000);
+    return;
+  }
+  
+  // Remove broken connection from registry first
+  executeOperation('revoke_exchanged_key', {
+    connection_id: connectionId,
+    revoke_type: 'local_only'
+  }, function(response) {
+    // Registry cleanup successful - proceed with new key exchange
+    swal({
+      title: 'Creating Fresh SSH Key',
+      html: 'Old entry removed. Creating new SSH key for <strong>' + displayHost + '</strong>...',
+      type: 'info',  
+      showConfirmButton: false,
+      allowOutsideClick: false
+    });
+    
+    setTimeout(function() {
+      proceedWithKeyExchange();
+    }, 2000);
+  }, function(error) {
+    // Registry cleanup failed but proceed anyway
+    swal({
+      title: 'Creating New SSH Key',
+      html: 'Registry cleanup had issues, but proceeding to create SSH key for <strong>' + displayHost + '</strong>...',
+      type: 'warning',
+      showConfirmButton: false,
+      allowOutsideClick: false
+    });
+    
+    setTimeout(function() {
+      proceedWithKeyExchange();
+    }, 2000);
+  });
+}
 
 // SSH Key Management Functions
 function checkKeyStatus() {
