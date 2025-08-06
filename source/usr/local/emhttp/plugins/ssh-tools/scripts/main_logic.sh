@@ -371,11 +371,37 @@ test_existing_ssh_key_access() {
     local username="$2"
     local port="$3"
     
-    # Test SSH connectivity using any existing keys (BatchMode prevents password prompts)
+    # First, try to find the individual SSH key for this connection
+    local found_connection=$(find_connection_key_path "$host" "$username" "$port")
+    
+    # Test with individual key if available
+    if [[ -n "$found_connection" ]] && [[ "$found_connection" != "null" ]] && [[ -f "$found_connection" ]]; then
+        log_info "Testing SSH access with individual key: $found_connection"
+        
+        # Add known_hosts entry to prevent SSH issues (fix from old script)
+        ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+        
+        if ssh -i "$found_connection" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${username}@${host}" true 2>/dev/null; then
+            log_info "SSH access test successful with individual key"
+            echo "true"
+            return 0
+        else
+            log_info "SSH access test failed with individual key"
+        fi
+    else
+        log_info "No individual key found, testing with any available SSH keys"
+    fi
+    
+    # Fallback: Test SSH connectivity using any available keys (BatchMode prevents password prompts)
+    # Add known_hosts entry first
+    ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
+    
     if ssh -p "$port" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${username}@${host}" true 2>/dev/null; then
+        log_info "SSH access test successful with general key detection"
         echo "true"
         return 0
     else
+        log_info "SSH access test failed - no working SSH key found"
         echo "false"
         return 1
     fi

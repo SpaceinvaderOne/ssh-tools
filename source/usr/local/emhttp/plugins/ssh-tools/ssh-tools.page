@@ -528,18 +528,18 @@ function handleExistingSSHConnection(host, username, port, displayHost, registry
     // Add to registry by calling the backend
     addExistingConnectionToRegistry(host, username, port, displayHost);
   } else if (registryExists) {
-    // In registry but SSH doesn't work - automatically fix broken connection
+    // In registry but SSH test failed - this should be rare now with improved detection
+    // For now, just show it's already tracked (most likely working but test failed)
     swal({
-      title: 'Updating Broken Connection',
-      html: '🔄 Connection to <strong>' + displayHost + '</strong> exists but is not working.<br><br>' +
-            'Cleaning up old entry and creating fresh SSH key...',
+      title: 'Connection Already Tracked',
+      html: '✅ SSH connection to <strong>' + displayHost + '</strong> is already in your tracking registry.<br><br>' +
+            'If you\'re having connection issues, you can manage this connection from the "Manage SSH Keys" tab.',
       type: 'info',
-      showConfirmButton: false,
-      allowOutsideClick: false
+      confirmButtonText: 'View Connections'
+    }, function() {
+      showTab('manage');
+      refreshExchangedKeys();
     });
-    
-    // Automatically clean up broken entry and proceed with key exchange
-    cleanupBrokenConnectionAndProceed(host, username, port, displayHost, details);
   }
 }
 
@@ -634,62 +634,7 @@ function proceedWithKeyExchange() {
 
 // Removed complex duplicate handling functions - using simplified approach
 
-// Helper function to cleanup broken connection and proceed with key exchange
-function cleanupBrokenConnectionAndProceed(host, username, port, displayHost, details) {
-  // Extract connection ID from details (format: "ID: conn-20250805202442-362251")
-  let connectionId = '';
-  if (details && details.includes('ID: ')) {
-    connectionId = details.replace('ID: ', '').trim();
-  }
-  
-  if (!connectionId) {
-    // If we can't extract connection ID, proceed anyway with key exchange
-    swal({
-      title: 'Creating New SSH Key',
-      html: 'Unable to cleanup old entry, but proceeding to create fresh SSH key for <strong>' + displayHost + '</strong>...',
-      type: 'info',
-      showConfirmButton: false,
-      allowOutsideClick: false
-    });
-    
-    setTimeout(function() {
-      proceedWithKeyExchange();
-    }, 2000);
-    return;
-  }
-  
-  // Remove broken connection from registry first
-  executeOperation('revoke_exchanged_key', {
-    connection_id: connectionId,
-    revoke_type: 'local_only'
-  }, function(response) {
-    // Registry cleanup successful - proceed with new key exchange
-    swal({
-      title: 'Creating Fresh SSH Key',
-      html: 'Old entry removed. Creating new SSH key for <strong>' + displayHost + '</strong>...',
-      type: 'info',  
-      showConfirmButton: false,
-      allowOutsideClick: false
-    });
-    
-    setTimeout(function() {
-      proceedWithKeyExchange();
-    }, 2000);
-  }, function(error) {
-    // Registry cleanup failed but proceed anyway
-    swal({
-      title: 'Creating New SSH Key',
-      html: 'Registry cleanup had issues, but proceeding to create SSH key for <strong>' + displayHost + '</strong>...',
-      type: 'warning',
-      showConfirmButton: false,
-      allowOutsideClick: false
-    });
-    
-    setTimeout(function() {
-      proceedWithKeyExchange();
-    }, 2000);
-  });
-}
+// Removed cleanupBrokenConnectionAndProceed function - no longer needed with improved SSH detection
 
 // SSH Key Management Functions
 function checkKeyStatus() {
