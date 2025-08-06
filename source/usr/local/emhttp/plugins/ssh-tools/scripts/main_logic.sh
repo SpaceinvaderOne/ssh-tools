@@ -471,6 +471,9 @@ detect_duplicate_ssh_access() {
         details="SSH access exists (not tracked in registry)"
     fi
     
+    # Clean details to prevent format corruption (remove newlines and pipes)
+    details=$(echo "$details" | tr '\n' ' ' | tr '|' '-')
+    
     echo "${registry_exists}|${ssh_access_exists}|${details}|${is_stale}"
 }
 
