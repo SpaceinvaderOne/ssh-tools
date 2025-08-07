@@ -144,6 +144,58 @@ switch ($operation) {
         }
         break;
         
+    case 'exchange_global_key':
+        if (isset($_POST['host'])) {
+            $validation = validateInput($_POST['host'], 'host');
+            if (isset($validation['error'])) {
+                echo "Error: " . $validation['error'];
+                exit;
+            }
+            $env['REMOTE_HOST'] = $validation['value'];
+        } else {
+            echo "Error: Host is required";
+            exit;
+        }
+        
+        if (isset($_POST['username'])) {
+            $validation = validateInput($_POST['username'], 'username');
+            if (isset($validation['error'])) {
+                echo "Error: " . $validation['error'];
+                exit;
+            }
+            $env['REMOTE_USERNAME'] = $validation['value'];
+        } else {
+            echo "Error: Username is required";
+            exit;
+        }
+        
+        if (isset($_POST['password'])) {
+            $validation = validateInput($_POST['password'], 'password');
+            if (isset($validation['error'])) {
+                echo "Error: " . $validation['error'];
+                exit;
+            }
+            $env['REMOTE_PASSWORD'] = $validation['value'];
+        } else {
+            echo "Error: Password is required";
+            exit;
+        }
+        
+        if (isset($_POST['port'])) {
+            $port = intval($_POST['port']);
+            if ($port < 1 || $port > 65535) {
+                echo "Error: Port must be between 1 and 65535";
+                exit;
+            }
+            $env['REMOTE_PORT'] = $port;
+        } else {
+            $env['REMOTE_PORT'] = 22;
+        }
+        
+        // Mark this as a global key operation
+        $env['KEY_TYPE'] = 'global';
+        break;
+        
     case 'test_single_connection':
         if (isset($_POST['host'])) {
             $validation = validateInput($_POST['host'], 'host');
@@ -187,6 +239,7 @@ switch ($operation) {
     case 'list_exchanged_keys':
     case 'test_all_connections':
     case 'list_authorized_keys':
+    case 'list_global_keys':
         // No additional parameters needed
         break;
         

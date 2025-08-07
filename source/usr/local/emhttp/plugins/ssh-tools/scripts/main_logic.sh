@@ -11,6 +11,7 @@ GLOBAL_SSH_KEY_PATH="/root/.ssh/id_${SSH_KEY_TYPE}"  # Keep for system compatibi
 GLOBAL_SSH_PUB_KEY_PATH="${GLOBAL_SSH_KEY_PATH}.pub"
 PLUGIN_DATA_DIR="/boot/config/plugins/ssh-tools"
 CONNECTIONS_REGISTRY="/root/.ssh/ssh-tools-connections.json"
+GLOBAL_KEYS_REGISTRY="/boot/config/plugins/ssh-tools/global_keys.txt"
 
 # Helper functions
 error_exit() {
@@ -42,6 +43,22 @@ EOF
     fi
 }
 
+# Initialize global keys registry with clean JSON structure
+initialize_global_keys_registry() {
+    if [[ ! -f "$GLOBAL_KEYS_REGISTRY" ]]; then
+        cat > "$GLOBAL_KEYS_REGISTRY" << EOF
+{
+  "version": "1.0",
+  "created": "$(date -Iseconds)",
+  "last_updated": "$(date -Iseconds)",
+  "global_keys": []
+}
+EOF
+        chmod 644 "$GLOBAL_KEYS_REGISTRY" 2>/dev/null || true
+        debug_log "Created global keys registry: $GLOBAL_KEYS_REGISTRY"
+    fi
+}
+
 # Ensure plugin data directory exists
 ensure_data_dir() {
     if [[ ! -d "$PLUGIN_DATA_DIR" ]]; then
@@ -51,6 +68,9 @@ ensure_data_dir() {
     
     # Initialize JSON connections registry
     initialize_connections_registry
+    
+    # Initialize global keys registry
+    initialize_global_keys_registry
 }
 
 # Validate environment
@@ -931,6 +951,239 @@ list_exchanged_keys() {
     echo "</div>"
 }
 
+# Exchange SSH keys using global key (separate from paired keys system)
+exchange_global_ssh_key() {
+    local host="$1"
+    local username="$2"
+    local password="$3"
+    local port="${4:-22}"  # Default to port 22 if not specified
+    
+    log_info "🌐 Starting global SSH key exchange with ${username}@${host}:${port}..."
+    
+    # Ensure global SSH key exists, create if needed
+    if [[ ! -f "$GLOBAL_SSH_KEY_PATH" ]]; then
+        log_info "🔑 Global SSH key not found - generating ${SSH_KEY_TYPE} key..."
+        ssh-keygen -t "$SSH_KEY_TYPE" -f "$GLOBAL_SSH_KEY_PATH" -N "" -C "Global SSH Key ($(hostname))" >/dev/null 2>&1
+        if [[ $? -eq 0 ]]; then
+            log_info "✅ Global SSH key generated successfully"
+        else
+            error_exit "Failed to generate global SSH key"
+        fi
+    fi
+    
+    # Verify global key files exist
+    if [[ ! -f "$GLOBAL_SSH_KEY_PATH" ]] || [[ ! -f "$GLOBAL_SSH_PUB_KEY_PATH" ]]; then
+        error_exit "Global SSH key files are missing"
+    fi
+    
+    # Test SSH connection first
+    log_info "🔍 Testing SSH connection to ${username}@${host}:${port}..."
+    if ! test_ssh_connection_with_retry "$host" "$username" "$password" "$port" 1 1; then
+        error_exit "Cannot connect to ${host}. Please verify host, credentials, and network connectivity."
+    fi
+    
+    # Use ssh-copy-id to install the global public key
+    log_info "🔄 Installing global public key on ${username}@${host}:${port}..."
+    
+    # Use sshpass with ssh-copy-id for global key
+    if command -v sshpass >/dev/null 2>&1; then
+        SSHPASS="$password" sshpass -e ssh-copy-id -i "$GLOBAL_SSH_PUB_KEY_PATH" -p "$port" -o StrictHostKeyChecking=no "${username}@${host}" >/dev/null 2>&1
+    else
+        error_exit "sshpass is required for global key exchange but not available"
+    fi
+    
+    if [[ $? -eq 0 ]]; then
+        log_info "✅ Global public key installed successfully"
+    else
+        error_exit "Failed to install global public key on remote server"
+    fi
+    
+    # Test the global key SSH access
+    log_info "🔍 Testing global key SSH access..."
+    if ssh -i "$GLOBAL_SSH_KEY_PATH" -p "$port" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${username}@${host}" true >/dev/null 2>&1; then
+        log_info "✅ Global SSH key access verified"
+    else
+        error_exit "Global SSH key was installed but access test failed"
+    fi
+    
+    # Add to global keys registry
+    add_global_key_to_registry "$host" "$username" "$port"
+    
+    log_info "🎯 Global SSH key exchange completed successfully"
+    echo "Successfully exchanged global SSH key with ${username}@${host}:${port}"
+}
+
+# Add server to global keys registry
+add_global_key_to_registry() {
+    local host="$1"
+    local username="$2"
+    local port="$3"
+    
+    if ! command -v jq >/dev/null 2>&1; then
+        log_info "⚠ jq not available - global key registry not updated"
+        return 0
+    fi
+    
+    local now=$(date -Iseconds)
+    
+    # Check if a global key entry already exists
+    local existing_entry=$(jq --arg host "$host" --arg username "$username" --arg port "$port" \
+        '.global_keys[] | select(.servers[]? | select(.host == $host and .username == $username and .port == ($port | tonumber)))' \
+        "$GLOBAL_KEYS_REGISTRY" 2>/dev/null)
+    
+    if [[ -n "$existing_entry" ]]; then
+        # Update existing server entry
+        jq --arg host "$host" --arg username "$username" --arg port "$port" --arg now "$now" \
+            '(.global_keys[] | .servers[] | select(.host == $host and .username == $username and .port == ($port | tonumber)) | .last_tested) = $now |
+             .last_updated = $now' \
+            "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp" && mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+    else
+        # Check if any global key entry exists at all
+        local global_key_count=$(jq '.global_keys | length' "$GLOBAL_KEYS_REGISTRY" 2>/dev/null || echo "0")
+        
+        if [[ "$global_key_count" -eq 0 ]]; then
+            # Create first global key entry
+            local global_key_id="global-$(date +%Y%m%d%H%M%S)-$$"
+            jq --arg id "$global_key_id" --arg host "$host" --arg username "$username" --arg port "$port" --arg now "$now" \
+                '.global_keys = [{
+                    "id": $id,
+                    "key_type": "global",
+                    "key_file": "/root/.ssh/id_ed25519",
+                    "created": $now,
+                    "servers": [{
+                        "host": $host,
+                        "username": $username,
+                        "port": ($port | tonumber),
+                        "added": $now,
+                        "last_tested": $now,
+                        "status": "active"
+                    }]
+                }] |
+                .last_updated = $now' \
+                "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp" && mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+        else
+            # Add server to existing global key entry
+            jq --arg host "$host" --arg username "$username" --arg port "$port" --arg now "$now" \
+                '.global_keys[0].servers += [{
+                    "host": $host,
+                    "username": $username,
+                    "port": ($port | tonumber),
+                    "added": $now,
+                    "last_tested": $now,
+                    "status": "active"
+                }] |
+                .last_updated = $now' \
+                "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp" && mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+        fi
+    fi
+    
+    debug_log "Added ${username}@${host}:${port} to global keys registry"
+}
+
+# List global SSH keys and servers
+list_global_keys() {
+    if [[ ! -f "$GLOBAL_KEYS_REGISTRY" ]]; then
+        echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
+        echo "No global SSH keys configured yet.<br>Use the 'Exchange Keys' tab with 'Global Key' option to add servers."
+        echo "</div>"
+        return 0
+    fi
+    
+    # Check if jq is available
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "<div style='color: #dc3545; text-align: center; padding: 20px; border: 1px solid #dc3545; border-radius: 5px;'>"
+        echo "Error: jq is required to display global keys.<br>Please install jq to use this feature."
+        echo "</div>"
+        return 1
+    fi
+    
+    # Get global key count
+    local global_key_count=$(jq '.global_keys | length' "$GLOBAL_KEYS_REGISTRY" 2>/dev/null || echo "0")
+    
+    if [[ "$global_key_count" -eq 0 ]]; then
+        echo "<div style='color: #666; font-style: italic; text-align: center; padding: 20px; border: 1px dashed #ccc; border-radius: 5px;'>"
+        echo "No global SSH keys configured yet.<br>Use the 'Exchange Keys' tab with 'Global Key' option to add servers."
+        echo "</div>"
+        return 0
+    fi
+    
+    echo "<h4>Successfully Exchanged Keys: Global keys</h4>"
+    echo "<div style='margin-bottom: 15px;'>"
+    
+    # Process each global key entry
+    local global_keys_json=$(jq -c '.global_keys[]' "$GLOBAL_KEYS_REGISTRY" 2>/dev/null)
+    
+    if [[ -n "$global_keys_json" ]]; then
+        echo "$global_keys_json" | while IFS= read -r global_key; do
+            local key_id=$(echo "$global_key" | jq -r '.id // "unknown"')
+            local created=$(echo "$global_key" | jq -r '.created // null')
+            local server_count=$(echo "$global_key" | jq '.servers | length')
+            
+            local created_display=""
+            if [[ "$created" != "null" ]]; then
+                created_display=$(date -d "$created" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$created")
+            fi
+            
+            echo "<div style='margin-bottom: 15px; padding: 15px; border: 2px solid #ffc107; border-radius: 8px; background: #fff8e1;'>"
+            echo "  <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;'>"
+            echo "    <div>"
+            echo "      <strong style='color: #333;'>Global SSH Key</strong>"
+            echo "      <span style='color: #666; margin-left: 10px;'>Active on $server_count server(s)</span>"
+            echo "      <div style='font-size: 11px; color: #888; margin-top: 2px;'>Created: $created_display</div>"
+            echo "    </div>"
+            echo "    <div>"
+            echo "      <button onclick=\"revokeGlobalKey('$key_id')\" style='background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: bold;' title='Revoke all global SSH access'>REVOKE ACCESS</button>"
+            echo "    </div>"
+            echo "  </div>"
+            
+            # List servers using this global key
+            echo "  <div style='margin-top: 10px;'>"
+            local servers_json=$(echo "$global_key" | jq -c '.servers[]?')
+            if [[ -n "$servers_json" ]]; then
+                echo "$servers_json" | while IFS= read -r server; do
+                    local host=$(echo "$server" | jq -r '.host // "unknown"')
+                    local username=$(echo "$server" | jq -r '.username // "unknown"')
+                    local port=$(echo "$server" | jq -r '.port // 22')
+                    local status=$(echo "$server" | jq -r '.status // "unknown"')
+                    local last_tested=$(echo "$server" | jq -r '.last_tested // null')
+                    
+                    # Display hostname with port if non-standard
+                    local display_host="$host"
+                    if [[ "$port" != "22" ]]; then
+                        display_host="${host}:${port}"
+                    fi
+                    
+                    # Determine status color and text
+                    local status_color="#666"
+                    local status_text="Unknown"
+                    
+                    if [[ "$status" == "active" ]]; then
+                        status_color="#28a745"
+                        status_text="✓ Active"
+                    elif [[ "$status" == "inactive" ]]; then
+                        status_color="#dc3545"
+                        status_text="✗ Inactive"
+                    fi
+                    
+                    echo "    <div style='margin-bottom: 8px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa;'>"
+                    echo "      <div style='display: flex; justify-content: space-between; align-items: center;'>"
+                    echo "        <div>"
+                    echo "          <strong style='color: #333;'>$display_host</strong>"
+                    echo "          <span style='color: #666; margin-left: 10px;'>User: $username</span>"
+                    echo "        </div>"
+                    echo "        <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
+                    echo "      </div>"
+                    echo "    </div>"
+                done
+            fi
+            echo "  </div>"
+            echo "</div>"
+        done
+    fi
+    
+    echo "</div>"
+}
+
 # Test all previously exchanged connections using individual keys
 test_all_connections() {
     if [[ ! -f "$CONNECTIONS_REGISTRY" ]]; then
@@ -1472,6 +1725,12 @@ process_operation() {
             fi
             exchange_ssh_keys "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PASSWORD" "$REMOTE_PORT"
             ;;
+        "exchange_global_key")
+            if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USERNAME" ]] || [[ -z "$REMOTE_PASSWORD" ]]; then
+                error_exit "Missing required parameters for global key exchange"
+            fi
+            exchange_global_ssh_key "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PASSWORD" "$REMOTE_PORT"
+            ;;
         "test_single_connection")
             if [[ -z "$TEST_HOST" ]]; then
                 error_exit "Missing host parameter for connection test"
@@ -1480,6 +1739,9 @@ process_operation() {
             ;;
         "list_exchanged_keys")
             list_exchanged_keys
+            ;;
+        "list_global_keys")
+            list_global_keys
             ;;
         "test_all_connections")
             test_all_connections

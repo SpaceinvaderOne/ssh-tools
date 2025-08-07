@@ -242,6 +242,17 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
     </dl>
     
     <dl>
+      <dt>Key Type</dt>
+      <dd>
+        <select id="keyType" class="short" onchange="updateKeyTypeDescription()">
+          <option value="paired">Key Pairs (Recommended)</option>
+          <option value="global">Global Key</option>
+        </select>
+        <div id="keyTypeDescription" class="description">Individual SSH key pair for this connection (more secure)</div>
+      </dd>
+    </dl>
+    
+    <dl>
       <dt>Password</dt>
       <dd>
         <input type="password" id="remotePassword" class="short" placeholder="Password for authentication" autocomplete="current-password">
@@ -352,6 +363,19 @@ function togglePasswordVisibility() {
   }
 }
 
+function updateKeyTypeDescription() {
+  const keyType = document.getElementById('keyType').value;
+  const description = document.getElementById('keyTypeDescription');
+  
+  if (keyType === 'global') {
+    description.innerHTML = '⚠️ Uses single SSH key for all connections - less secure but convenient for terminal SSH access';
+    description.style.color = '#ff6b35';
+  } else {
+    description.innerHTML = 'Individual SSH key pair for this connection (more secure)';
+    description.style.color = '';
+  }
+}
+
 // Tab functionality
 function showTab(tabId) {
   // Hide all tab content
@@ -436,6 +460,47 @@ function showConfirmModal(hostname) {
     if (isConfirm) {
       // Perform the exchange operation
       performSSHKeyExchange();
+    } else {
+      // User cancelled - clear stored data
+      modalActionData = {};
+    }
+  });
+}
+
+function showGlobalKeyConfirmModal(hostname) {
+  // Store data for later use
+  modalActionData = {
+    hostname: hostname,
+    host: document.getElementById('remoteHost').value,
+    username: document.getElementById('remoteUsername').value,
+    password: document.getElementById('remotePassword').value,
+    port: document.getElementById('remotePort').value,
+    keyType: 'global'
+  };
+  
+  // Format display hostname with port if non-standard
+  const displayHost = modalActionData.port && modalActionData.port != 22 
+    ? hostname + ':' + modalActionData.port
+    : hostname;
+  
+  swal({
+    title: 'Global SSH Key Exchange',
+    text: '⚠️ <strong>Global Key Selected</strong><br><br>' +
+          'This will use your global SSH key for <strong>' + displayHost + '</strong>.<br><br>' +
+          '<strong>Benefits:</strong> Terminal SSH access works directly (<code>ssh ' + modalActionData.username + '@' + modalActionData.host + '</code>)<br>' +
+          '<strong>Security:</strong> Less secure - one key affects multiple connections<br>' +
+          '<strong>Revocation:</strong> Revoking affects ALL servers using this key<br><br>' +
+          'Continue with global key exchange?',
+    type: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Use Global Key',
+    cancelButtonText: 'Cancel',
+    closeOnConfirm: true,
+    html: true
+  }, function(isConfirm) {
+    if (isConfirm) {
+      // Perform the global key exchange operation
+      performGlobalSSHKeyExchange();
     } else {
       // User cancelled - clear stored data
       modalActionData = {};
@@ -717,14 +782,19 @@ function exchangeSSHKeys() {
   const username = document.getElementById('remoteUsername').value;
   const password = document.getElementById('remotePassword').value;
   const port = document.getElementById('remotePort').value;
+  const keyType = document.getElementById('keyType').value;
   
   if (!host || !username || !password) {
     setStatus('Error: Please fill in all fields to exchange SSH keys', 'error');
     return;
   }
   
-  // Show confirmation modal first
-  showConfirmModal(host);
+  // Show confirmation modal first (different modal for different key types)
+  if (keyType === 'global') {
+    showGlobalKeyConfirmModal(host);
+  } else {
+    showConfirmModal(host);
+  }
 }
 
 function performSSHKeyExchange() {
@@ -789,6 +859,64 @@ function performSSHKeyExchange() {
   });
 }
 
+function performGlobalSSHKeyExchange() {
+  const postData = {
+    host: modalActionData.host,
+    username: modalActionData.username,
+    password: modalActionData.password,
+    port: modalActionData.port,
+    key_type: 'global'
+  };
+  
+  setButtonLoading('exchangeBtn', true);
+  
+  // Format display hostname with port if non-standard
+  const displayHost = modalActionData.port && modalActionData.port != 22 
+    ? modalActionData.hostname + ':' + modalActionData.port
+    : modalActionData.hostname;
+  
+  updateStatus('Processing global SSH key exchange for ' + displayHost + '...');
+  
+  executeOperation('exchange_global_key', postData, function(response) {
+    setButtonLoading('exchangeBtn', false);
+    smartUpdateStatus(response);
+    
+    // Show success modal and auto-navigate
+    if (response.toLowerCase().includes('successfully')) {
+      swal({
+        title: 'Global Key Exchange Success!',
+        text: 'Global SSH key has been successfully exchanged with ' + displayHost + 
+              '.\n\nYou can now use: ssh ' + modalActionData.username + '@' + modalActionData.host + 
+              (modalActionData.port != 22 ? ' -p ' + modalActionData.port : ''),
+        type: 'success',
+        confirmButtonText: 'View SSH Keys',
+        closeOnConfirm: true
+      }, function() {
+        // Auto-navigate to Manage SSH Keys tab and refresh both lists
+        checkKeyStatus();
+        refreshExchangedKeys();
+        refreshGlobalKeys();
+        showTab('manage');
+      });
+    } else if (response.toLowerCase().includes('error')) {
+      swal({
+        title: 'Global Key Exchange Failed',
+        text: response,
+        type: 'error',
+        confirmButtonText: 'OK'
+      });
+    }
+  }, function() {
+    setButtonLoading('exchangeBtn', false);
+    swal({
+      title: 'Error',
+      text: 'Failed to communicate with the server for global key exchange',
+      type: 'error',
+      confirmButtonText: 'OK'
+    });
+  });
+}
+
 function refreshExchangedKeys() {
   document.getElementById('exchangedKeysList').innerHTML = '<div class="loading-spinner"></div>Loading exchanged keys...';
   
@@ -797,6 +925,23 @@ function refreshExchangedKeys() {
     smartUpdateStatus('Exchanged keys list updated');
   }, function() {
     document.getElementById('exchangedKeysList').innerHTML = '<div style="color: #dc3545;">Error loading exchanged keys</div>';
+  });
+}
+
+function refreshGlobalKeys() {
+  // Check if global keys section exists (it won't exist until we add the UI)
+  const globalKeysList = document.getElementById('globalKeysList');
+  if (!globalKeysList) {
+    return; // Global keys UI not implemented yet
+  }
+  
+  globalKeysList.innerHTML = '<div class="loading-spinner"></div>Loading global keys...';
+  
+  executeOperation('list_global_keys', {}, function(response) {
+    globalKeysList.innerHTML = response;
+    smartUpdateStatus('Global keys list updated');
+  }, function() {
+    globalKeysList.innerHTML = '<div style="color: #dc3545;">Error loading global keys</div>';
   });
 }
 
