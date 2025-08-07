@@ -11,7 +11,7 @@ GLOBAL_SSH_KEY_PATH="/root/.ssh/id_${SSH_KEY_TYPE}"  # Keep for system compatibi
 GLOBAL_SSH_PUB_KEY_PATH="${GLOBAL_SSH_KEY_PATH}.pub"
 PLUGIN_DATA_DIR="/boot/config/plugins/ssh-tools"
 CONNECTIONS_REGISTRY="/root/.ssh/ssh-tools-connections.json"
-GLOBAL_KEYS_REGISTRY="/boot/config/plugins/ssh-tools/global_keys.txt"
+GLOBAL_KEYS_REGISTRY="/root/.ssh/global-ssh-keys.json"
 
 # Helper functions
 error_exit() {
@@ -46,6 +46,9 @@ EOF
 # Initialize global keys registry with clean JSON structure
 initialize_global_keys_registry() {
     if [[ ! -f "$GLOBAL_KEYS_REGISTRY" ]]; then
+        # Ensure .ssh directory exists
+        mkdir -p "$(dirname "$GLOBAL_KEYS_REGISTRY")" 2>/dev/null || true
+        
         cat > "$GLOBAL_KEYS_REGISTRY" << EOF
 {
   "version": "1.0",

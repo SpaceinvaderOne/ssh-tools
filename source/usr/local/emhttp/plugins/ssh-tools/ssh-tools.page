@@ -204,8 +204,24 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   <div style="margin-top: 20px;">
     <h3>Exchanged SSH Keys</h3>
     <p>Track and manage machines where SSH keys have been successfully exchanged.</p>
-    <div id="exchangedKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
-      Loading exchanged keys...
+    
+    <!-- Key Pairs Section -->
+    <div style="margin-bottom: 25px;">
+      <h4>Successfully Exchanged Keys: Keypairs</h4>
+      <div id="exchangedKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
+        Loading exchanged keys...
+      </div>
+    </div>
+    
+    <!-- Global Keys Section -->
+    <div style="margin-bottom: 25px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <h4 style="margin: 0;">Successfully Exchanged Keys: Global keys</h4>
+        <button type="button" onclick="revokeGlobalKeys()" style="background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;" title="Revoke all global SSH access">REVOKE ACCESS</button>
+      </div>
+      <div id="globalKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
+        Loading global keys...
+      </div>
     </div>
   </div>
 </div>
@@ -397,6 +413,7 @@ function showTab(tabId) {
   // Refresh data when switching to certain tabs
   if (tabId === 'manage') {
     refreshExchangedKeys();
+    refreshGlobalKeys();
     refreshAuthorizedKeys();
   } else if (tabId === 'exchange') {
     checkKeyStatus();
@@ -929,19 +946,32 @@ function refreshExchangedKeys() {
 }
 
 function refreshGlobalKeys() {
-  // Check if global keys section exists (it won't exist until we add the UI)
-  const globalKeysList = document.getElementById('globalKeysList');
-  if (!globalKeysList) {
-    return; // Global keys UI not implemented yet
-  }
-  
-  globalKeysList.innerHTML = '<div class="loading-spinner"></div>Loading global keys...';
+  document.getElementById('globalKeysList').innerHTML = '<div class="loading-spinner"></div>Loading global keys...';
   
   executeOperation('list_global_keys', {}, function(response) {
-    globalKeysList.innerHTML = response;
+    document.getElementById('globalKeysList').innerHTML = response;
     smartUpdateStatus('Global keys list updated');
   }, function() {
-    globalKeysList.innerHTML = '<div style="color: #dc3545;">Error loading global keys</div>';
+    document.getElementById('globalKeysList').innerHTML = '<div style="color: #dc3545;">Error loading global keys</div>';
+  });
+}
+
+function revokeGlobalKeys() {
+  swal({
+    title: 'Revoke Global SSH Access',
+    text: 'This will remove the global SSH key from all servers and disable global key access. This action cannot be undone.',
+    type: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Yes, Revoke Access',
+    cancelButtonText: 'Cancel'
+  }, function() {
+    // TODO: Implement global key revocation
+    swal({
+      title: 'Global Key Revocation',
+      text: 'Global key revocation functionality will be implemented in a future update.',
+      type: 'info',
+      confirmButtonText: 'OK'
+    });
   });
 }
 
@@ -1260,6 +1290,7 @@ $(document).ready(function() {
     // Load initial data silently
     checkKeyStatus();
     refreshExchangedKeys();
+    refreshGlobalKeys();
     refreshAuthorizedKeys();
     updateStatus('Ready for SSH key operations');
   } else {
