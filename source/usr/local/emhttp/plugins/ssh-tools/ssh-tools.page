@@ -481,14 +481,21 @@ function handleStaleCleanupSuccess(response) {
   // Extract the message after "STALE_CLEANUP_SUCCESS: "
   const message = response.replace('STALE_CLEANUP_SUCCESS: ', '').trim();
   
+  // Extract connection details from the message
+  // Format: "Stale SSH connection cleaned up successfully. Please run 'Exchange SSH Keys' again to create a fresh connection to root@10.10.20.199:22."
+  const connectionMatch = message.match(/to ([^@]+@[^:]+:\d+)/);
+  const connectionDetails = connectionMatch ? connectionMatch[1] : 'the remote server';
+  
   swal({
-    title: 'Stale Connection Cleaned Up',
-    html: '🧹 ' + message + '<br><br>' +
-          '✅ Old connection data has been removed<br>' +
-          '🔑 Orphaned SSH keys have been cleaned up<br><br>' +
-          'Click "Exchange SSH Keys" again with the same credentials to create a fresh connection.',
-    type: 'info',
-    confirmButtonText: 'Got It',
+    title: 'Stale Connection Detected & Cleaned Up',
+    html: '<strong>A stale SSH connection to ' + connectionDetails + ' was found and cleaned up.</strong><br><br>' +
+          '<strong>What this means:</strong><br>' +
+          '• Your plugin had this connection in its records<br>' +
+          '• But the SSH key was missing from the remote server<br>' +
+          '• Old connection data has been removed and orphaned keys cleaned up<br><br>' +
+          '<strong>Next step:</strong> Click the <strong>"Exchange SSH Keys Now"</strong> button again with the same credentials to create a fresh connection.',
+    type: 'warning',
+    confirmButtonText: 'Continue',
     closeOnConfirm: true
   }, function() {
     // Refresh the exchanged keys list to show the cleanup
