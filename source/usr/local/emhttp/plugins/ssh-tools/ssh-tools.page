@@ -488,12 +488,12 @@ function handleStaleCleanupSuccess(response) {
   
   swal({
     title: 'Stale Connection Detected & Cleaned Up',
-    html: '<strong>A stale SSH connection to ' + connectionDetails + ' was found and cleaned up.</strong><br><br>' +
+    html: 'A stale SSH connection to <strong>' + connectionDetails + '</strong> was found and cleaned up.<br><br>' +
           '<strong>What this means:</strong><br>' +
           '• Your plugin had this connection in its records<br>' +
           '• But the SSH key was missing from the remote server<br>' +
           '• Old connection data has been removed and orphaned keys cleaned up<br><br>' +
-          '<strong>Next step:</strong> Click the <strong>"Exchange SSH Keys Now"</strong> button again with the same credentials to create a fresh connection.',
+          '<strong>Next step:</strong> Click the "Exchange SSH Keys Now" button again with the same credentials to create a fresh connection.',
     type: 'warning',
     confirmButtonText: 'Continue',
     closeOnConfirm: true
