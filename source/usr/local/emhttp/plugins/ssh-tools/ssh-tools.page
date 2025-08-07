@@ -492,16 +492,13 @@ function handleStaleCleanupSuccess(response) {
   
   // Extract connection details from the clean message
   // Format: "Stale SSH connection cleaned up successfully. Please run 'Exchange SSH Keys' again to create a fresh connection to root@10.10.20.199:22."
-  const connectionMatch = cleanMessage.match(/to ([^@]+@[^:]+:\d+)/);
+  const connectionMatch = cleanMessage.match(/connection to ([^@]+@[^:]+:\d+)/);
   const connectionDetails = connectionMatch ? connectionMatch[1] : 'the remote server';
   
   swal({
     title: 'Stale Connection Detected & Cleaned Up',
     text: 'A stale SSH connection to <strong>' + connectionDetails + '</strong> was detected and cleaned up.<br><br>' +
-          '<strong>What happened:</strong><br>' +
-          '• Your plugin had this connection in its tracking records<br>' +
-          '• But the SSH key was no longer present on the remote server<br>' +
-          '• The outdated connection data has been removed<br><br>' +
+          'Your plugin had this connection in its tracking records, but the SSH key was no longer present on the remote server. The outdated connection data has been removed.<br><br>' +
           '<strong>Next step:</strong> Click "Exchange SSH Keys Now" again with the same credentials to create a fresh connection.',
     type: 'warning',
     confirmButtonText: 'Continue',
