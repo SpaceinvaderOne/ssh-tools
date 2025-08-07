@@ -424,7 +424,7 @@ test_existing_ssh_key_access() {
         # Add known_hosts entry to prevent SSH issues (fix from old script)
         ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
         
-        if ssh -i "$found_connection" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${username}@${host}" true 2>/dev/null; then
+        if ssh -i "$found_connection" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${username}@${host}" true 2>/dev/null; then
             echo "true"
             return 0
         fi
@@ -769,7 +769,7 @@ exchange_ssh_keys() {
     
     # Verify the key exchange worked using individual key
     log_info "Verifying passwordless SSH connection with individual key..."
-    if ssh -i "$private_key" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+    if ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
         log_info "SSH key exchange completed successfully!"
         
         # Add connection to JSON registry with individual key path
@@ -816,7 +816,7 @@ test_single_ssh_connection() {
     
     # Test with individual key if available
     if [[ -n "$found_connection" ]] && [[ "$found_connection" != "null" ]] && [[ -f "$found_connection" ]]; then
-        if ssh -i "$found_connection" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" "echo 'SSH connection successful'" 2>/dev/null; then
+        if ssh -i "$found_connection" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 "${username}@${host}" "echo 'SSH connection successful'" 2>/dev/null; then
             log_info "SSH connection to ${username}@$display_host successful (using individual key)"
             
             # Update connection status in registry
@@ -1000,7 +1000,7 @@ exchange_global_ssh_key() {
     
     # Test the global key SSH access
     log_info "🔍 Testing global key SSH access..."
-    if ssh -i "$GLOBAL_SSH_KEY_PATH" -p "$port" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${username}@${host}" true >/dev/null 2>&1; then
+    if ssh -i "$GLOBAL_SSH_KEY_PATH" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${username}@${host}" true >/dev/null 2>&1; then
         log_info "✅ Global SSH key access verified"
     else
         error_exit "Global SSH key was installed but access test failed"
@@ -1229,7 +1229,7 @@ test_all_connections() {
             fi
             
             # Test connection using individual key
-            if [[ -f "$private_key" ]] && ssh -i "$private_key" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+            if [[ -f "$private_key" ]] && ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
                 log_info "✓ Connection to ${username}@${display_host} successful (using individual key)"
                 ((success_count++))
                 # Update connection status in registry
@@ -1883,7 +1883,7 @@ revoke_connection_full() {
     log_info "Key material: ${our_key_material:0:20}...${our_key_material: -20}"
     
     # Test connection first using individual key
-    if ! ssh -i "$private_key" -p "$port" -o BatchMode=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+    if ! ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
         log_info "⚠ Cannot connect to ${username}@${host}:${port} using individual key - server may be offline"
         log_info "Performing local cleanup only..."
         revoke_connection_local "$conn_id"
@@ -1930,7 +1930,7 @@ EOF
     
     # Execute remote script using individual key
     local ssh_output
-    ssh_output=$(ssh -i "$private_key" -p "$port" -o BatchMode=yes -o ConnectTimeout=10 "${username}@${host}" "bash -s '$our_key_material'" <<< "$remote_script" 2>&1)
+    ssh_output=$(ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=10 "${username}@${host}" "bash -s '$our_key_material'" <<< "$remote_script" 2>&1)
     local ssh_exit_code=$?
     
     log_info "Remote script output: $ssh_output"
