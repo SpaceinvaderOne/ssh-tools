@@ -577,32 +577,6 @@ test_ssh_connection_with_retry() {
     return 1
 }
 
-# Reset SSH client state to prevent interference after cleanup operations
-reset_ssh_client_state() {
-    log_info "🔄 Resetting SSH client state to ensure clean authentication..."
-    
-    # Kill any existing SSH control master connections
-    if [[ -S ~/.ssh/master-* ]] 2>/dev/null; then
-        ssh -O exit -o ControlPath='~/.ssh/master-%r@%h:%p' dummy 2>/dev/null || true
-        rm -f ~/.ssh/master-* 2>/dev/null || true
-        log_info "Cleared SSH control master connections"
-    fi
-    
-    # Clear SSH agent cached keys if SSH agent is running
-    if [[ -n "${SSH_AUTH_SOCK:-}" ]] && command -v ssh-add >/dev/null 2>&1; then
-        ssh-add -D 2>/dev/null || true
-        log_info "Cleared SSH agent cached keys"
-    fi
-    
-    # Clear any cached SSH connections by briefly resetting SSH client environment
-    unset SSH_CONNECTION SSH_CLIENT 2>/dev/null || true
-    
-    # Brief delay to allow SSH client subsystem to fully reset
-    log_info "Waiting for SSH client state to stabilize..."
-    sleep 3
-    
-    log_info "✅ SSH client state reset completed"
-}
 
 # Cleanup stale connection entries and associated SSH keys
 cleanup_stale_connection() {
@@ -663,8 +637,10 @@ cleanup_stale_connection() {
     
     log_info "🎯 Stale connection cleanup completed successfully"
     
-    # Reset SSH client state to prevent authentication interference
-    reset_ssh_client_state
+    # Brief delay to allow SSH client state to stabilize naturally
+    log_info "⏱️ Allowing SSH client state to stabilize..."
+    sleep 2
+    log_info "✅ Ready for fresh SSH connection"
     
     return 0
 }
@@ -701,7 +677,7 @@ exchange_ssh_keys() {
             
             # Cleanup stale entry and proceed with key exchange
             if cleanup_stale_connection "$host" "$username" "$port"; then
-                log_info "✨ Self-healing completed - SSH client state reset - proceeding with fresh key exchange"
+                log_info "✨ Self-healing completed - proceeding with fresh key exchange"
             else
                 log_info "❌ Self-healing failed - but proceeding with key exchange anyway"
             fi
