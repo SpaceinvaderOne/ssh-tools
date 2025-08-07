@@ -333,7 +333,12 @@ if (is_resource($process)) {
     $exitCode = proc_close($process);
     
     if ($exitCode === 0) {
-        echo $output;
+        // Check for stale cleanup success message
+        if (strpos($output, 'STALE_CLEANUP_SUCCESS:') !== false) {
+            echo $output; // Pass through the cleanup success message
+        } else {
+            echo $output; // Normal success output
+        }
     } elseif ($exitCode === 2) {
         // Handle duplicate detection (exit code 2)
         $fullOutput = $output . ($error ? "\n" . $error : "");

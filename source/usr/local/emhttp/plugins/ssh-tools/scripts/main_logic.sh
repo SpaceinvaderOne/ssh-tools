@@ -675,9 +675,10 @@ exchange_ssh_keys() {
                 log_info "🔍 Stale entry details: $details"
             fi
             
-            # Cleanup stale entry and proceed with key exchange
+            # Cleanup stale entry and return - user will run exchange again in fresh context
             if cleanup_stale_connection "$host" "$username" "$port"; then
-                log_info "✨ Self-healing completed - proceeding with fresh key exchange"
+                echo "STALE_CLEANUP_SUCCESS: Stale SSH connection cleaned up successfully. Please run 'Exchange SSH Keys' again to create a fresh connection to ${username}@${host}:${port}."
+                return 0  # Exit successfully after cleanup
             else
                 log_info "❌ Self-healing failed - but proceeding with key exchange anyway"
             fi

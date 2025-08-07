@@ -476,6 +476,26 @@ function smartUpdateStatus(message) {
   updateStatus(message, type);
 }
 
+// Handle stale cleanup success notification
+function handleStaleCleanupSuccess(response) {
+  // Extract the message after "STALE_CLEANUP_SUCCESS: "
+  const message = response.replace('STALE_CLEANUP_SUCCESS: ', '').trim();
+  
+  swal({
+    title: 'Stale Connection Cleaned Up',
+    html: '🧹 ' + message + '<br><br>' +
+          '✅ Old connection data has been removed<br>' +
+          '🔑 Orphaned SSH keys have been cleaned up<br><br>' +
+          'Click "Exchange SSH Keys" again with the same credentials to create a fresh connection.',
+    type: 'info',
+    confirmButtonText: 'Got It',
+    closeOnConfirm: true
+  }, function() {
+    // Refresh the exchanged keys list to show the cleanup
+    refreshExchangedKeys();
+  });
+}
+
 // Duplicate Detection and User Choice System
 function handleDuplicateDetection(response) {
   // Parse the duplicate detection response: DUPLICATE_DETECTED|host|username|port|registry_exists|ssh_access_exists|details
@@ -714,8 +734,12 @@ function performSSHKeyExchange() {
     setButtonLoading('exchangeBtn', false);
     smartUpdateStatus(response);
     
+    // Check for stale cleanup success response
+    if (response.includes('STALE_CLEANUP_SUCCESS:')) {
+      handleStaleCleanupSuccess(response);
+    }
     // Check for duplicate detection response
-    if (response.includes('DUPLICATE_DETECTED|')) {
+    else if (response.includes('DUPLICATE_DETECTED|')) {
       handleDuplicateDetection(response);
     }
     // Show success modal and auto-navigate
