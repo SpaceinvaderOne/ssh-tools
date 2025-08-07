@@ -492,23 +492,10 @@ test_ssh_connection() {
         return 1
     fi
     
-    # Enhanced SSH options for reliable password authentication with sshpass
-    local ssh_opts=(
-        -p "$port"
-        -o ConnectTimeout=10
-        -o StrictHostKeyChecking=no
-        -o UserKnownHostsFile=/dev/null
-        -o PreferredAuthentications=password
-        -o PubkeyAuthentication=no
-        -o PasswordAuthentication=yes
-        -o BatchMode=yes
-        -o LogLevel=ERROR
-    )
-    
     log_info "Attempting password authentication to ${username}@${host}:${port}..."
     
-    # Primary connection test with optimized SSH options
-    if sshpass -p "$password" ssh "${ssh_opts[@]}" "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
+    # Primary connection test with sshpass (simplified options that work reliably)
+    if sshpass -p "$password" ssh -p "$port" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password "${username}@${host}" "echo 'Connection test successful'" 2>/dev/null; then
         log_info "Connection test to ${username}@${host}:${port} succeeded"
         return 0
     fi
@@ -524,7 +511,7 @@ test_ssh_connection() {
     
     # Test 2: Try with verbose output to understand failure mode
     local ssh_debug_output
-    ssh_debug_output=$(sshpass -p "$password" ssh -v "${ssh_opts[@]}" "${username}@${host}" "echo 'debug test'" 2>&1)
+    ssh_debug_output=$(sshpass -p "$password" ssh -v -p "$port" -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "${username}@${host}" "echo 'debug test'" 2>&1)
     local ssh_exit_code=$?
     
     # Analyze the failure
@@ -548,7 +535,7 @@ test_ssh_connection() {
     
     # Test 3: Fallback with even simpler SSH options (last resort)
     log_info "Attempting fallback connection test with minimal options..."
-    if sshpass -p "$password" ssh -p "$port" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password "${username}@${host}" "true" >/dev/null 2>&1; then
+    if sshpass -p "$password" ssh -p "$port" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "${username}@${host}" "true" >/dev/null 2>&1; then
         log_info "Fallback connection test succeeded - primary test may have option conflicts"
         return 0
     fi
