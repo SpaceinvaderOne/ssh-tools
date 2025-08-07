@@ -424,7 +424,7 @@ test_existing_ssh_key_access() {
         # Add known_hosts entry to prevent SSH issues (fix from old script)
         ssh-keyscan -p "$port" -H "$host" >> ~/.ssh/known_hosts 2>/dev/null || true
         
-        if ssh -i "$found_connection" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${username}@${host}" true 2>/dev/null; then
+        if ssh -i "$found_connection" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${username}@${host}" true 2>/dev/null; then
             echo "true"
             return 0
         fi
@@ -769,7 +769,9 @@ exchange_ssh_keys() {
     
     # Verify the key exchange worked using individual key
     log_info "Verifying passwordless SSH connection with individual key..."
-    if ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+    log_info "🔍 Testing key: $private_key"
+    log_info "🔧 SSH options: BatchMode=yes IdentitiesOnly=yes IdentityAgent=none PubkeyAcceptedKeyTypes=ssh-ed25519 PreferredAuthentications=publickey"
+    if ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
         log_info "SSH key exchange completed successfully!"
         
         # Add connection to JSON registry with individual key path
@@ -781,6 +783,25 @@ exchange_ssh_keys() {
         log_info "Connection recorded in registry with ID: $conn_id"
         return 0
     else
+        # Additional debugging for verification failure
+        log_info "❌ Verification failed - attempting debug connection..."
+        local debug_output
+        debug_output=$(ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=5 "${username}@${host}" true 2>&1)
+        log_info "🔍 Debug SSH output: $debug_output"
+        
+        # Check if the key files exist
+        if [[ -f "$private_key" ]]; then
+            log_info "✅ Private key file exists: $private_key"
+        else
+            log_info "❌ Private key file missing: $private_key"
+        fi
+        
+        if [[ -f "$public_key" ]]; then
+            log_info "✅ Public key file exists: $public_key"
+        else
+            log_info "❌ Public key file missing: $public_key"
+        fi
+        
         # Clean up generated key on verification failure
         rm -f "$private_key" "$public_key" 2>/dev/null || true
         error_exit "SSH key exchange failed - cannot connect without password using individual key"
@@ -816,7 +837,7 @@ test_single_ssh_connection() {
     
     # Test with individual key if available
     if [[ -n "$found_connection" ]] && [[ "$found_connection" != "null" ]] && [[ -f "$found_connection" ]]; then
-        if ssh -i "$found_connection" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 "${username}@${host}" "echo 'SSH connection successful'" 2>/dev/null; then
+        if ssh -i "$found_connection" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=5 "${username}@${host}" "echo 'SSH connection successful'" 2>/dev/null; then
             log_info "SSH connection to ${username}@$display_host successful (using individual key)"
             
             # Update connection status in registry
@@ -1000,7 +1021,7 @@ exchange_global_ssh_key() {
     
     # Test the global key SSH access
     log_info "🔍 Testing global key SSH access..."
-    if ssh -i "$GLOBAL_SSH_KEY_PATH" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${username}@${host}" true >/dev/null 2>&1; then
+    if ssh -i "$GLOBAL_SSH_KEY_PATH" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${username}@${host}" true >/dev/null 2>&1; then
         log_info "✅ Global SSH key access verified"
     else
         error_exit "Global SSH key was installed but access test failed"
@@ -1024,6 +1045,12 @@ add_global_key_to_registry() {
         return 0
     fi
     
+    # Ensure global keys registry exists
+    if [[ ! -f "$GLOBAL_KEYS_REGISTRY" ]]; then
+        log_info "📁 Creating global keys registry..."
+        initialize_global_keys_registry
+    fi
+    
     local now=$(date -Iseconds)
     
     # Check if a global key entry already exists
@@ -1037,6 +1064,14 @@ add_global_key_to_registry() {
             '(.global_keys[] | .servers[] | select(.host == $host and .username == $username and .port == ($port | tonumber)) | .last_tested) = $now |
              .last_updated = $now' \
             "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp" && mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+            
+        if [[ $? -eq 0 ]]; then
+            log_info "✅ Updated existing server entry in global keys registry"
+        else
+            log_info "❌ Failed to update server entry in global keys registry"
+            rm -f "${GLOBAL_KEYS_REGISTRY}.tmp" 2>/dev/null
+            return 1
+        fi
     else
         # Check if any global key entry exists at all
         local global_key_count=$(jq '.global_keys | length' "$GLOBAL_KEYS_REGISTRY" 2>/dev/null || echo "0")
@@ -1061,6 +1096,14 @@ add_global_key_to_registry() {
                 }] |
                 .last_updated = $now' \
                 "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp" && mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+            
+            if [[ $? -eq 0 ]]; then
+                log_info "✅ Added first server to global keys registry"
+            else
+                log_info "❌ Failed to add server to global keys registry"
+                rm -f "${GLOBAL_KEYS_REGISTRY}.tmp" 2>/dev/null
+                return 1
+            fi
         else
             # Add server to existing global key entry
             jq --arg host "$host" --arg username "$username" --arg port "$port" --arg now "$now" \
@@ -1074,6 +1117,14 @@ add_global_key_to_registry() {
                 }] |
                 .last_updated = $now' \
                 "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp" && mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+                
+            if [[ $? -eq 0 ]]; then
+                log_info "✅ Added server to existing global keys registry"
+            else
+                log_info "❌ Failed to add server to global keys registry"
+                rm -f "${GLOBAL_KEYS_REGISTRY}.tmp" 2>/dev/null
+                return 1
+            fi
         fi
     fi
     
@@ -1229,7 +1280,7 @@ test_all_connections() {
             fi
             
             # Test connection using individual key
-            if [[ -f "$private_key" ]] && ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+            if [[ -f "$private_key" ]] && ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
                 log_info "✓ Connection to ${username}@${display_host} successful (using individual key)"
                 ((success_count++))
                 # Update connection status in registry
@@ -1883,7 +1934,7 @@ revoke_connection_full() {
     log_info "Key material: ${our_key_material:0:20}...${our_key_material: -20}"
     
     # Test connection first using individual key
-    if ! ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+    if ! ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
         log_info "⚠ Cannot connect to ${username}@${host}:${port} using individual key - server may be offline"
         log_info "Performing local cleanup only..."
         revoke_connection_local "$conn_id"
@@ -1930,7 +1981,7 @@ EOF
     
     # Execute remote script using individual key
     local ssh_output
-    ssh_output=$(ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=10 "${username}@${host}" "bash -s '$our_key_material'" <<< "$remote_script" 2>&1)
+    ssh_output=$(ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=10 "${username}@${host}" "bash -s '$our_key_material'" <<< "$remote_script" 2>&1)
     local ssh_exit_code=$?
     
     log_info "Remote script output: $ssh_output"
