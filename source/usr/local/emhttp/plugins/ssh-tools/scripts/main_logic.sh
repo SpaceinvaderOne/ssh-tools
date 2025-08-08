@@ -1439,10 +1439,14 @@ list_authorized_keys() {
         local status_text="✓ Active"
         
         if [[ -n "$ping_target" ]] && [[ "$ping_target" != "Unknown Host" ]] && [[ "$ping_target" != *"localhost"* ]]; then
-            # Try to ping the extracted target (quick test with 1 second timeout for speed)
+            # Try to ping the extracted target (quick test with 1 second timeout)
             if ! timeout 1 ping -c 1 -W 1 "$ping_target" >/dev/null 2>&1; then
-                status_color="#dc3545"
-                status_text="✗ Inactive"
+                # First attempt failed, try with .local suffix for mDNS resolution
+                if ! timeout 1 ping -c 1 -W 1 "${ping_target}.local" >/dev/null 2>&1; then
+                    status_color="#dc3545"
+                    status_text="✗ Inactive"
+                fi
+                # If .local ping succeeds, we keep the default "✓ Active" status
             fi
         else
             # No pingable target found - show no status
