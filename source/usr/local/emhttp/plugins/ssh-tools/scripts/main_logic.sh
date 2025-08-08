@@ -27,6 +27,25 @@ log_info() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
+# Get SSH options that bypass known_hosts verification issues
+get_ssh_bypass_options() {
+    echo "-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR"
+}
+
+# Clean up known_hosts entries for a specific host
+cleanup_known_hosts_entry() {
+    local host="$1"
+    local port="${2:-22}"
+    
+    # Remove entries for both host and [host]:port formats
+    ssh-keygen -R "$host" 2>/dev/null || true
+    if [[ "$port" != "22" ]]; then
+        ssh-keygen -R "[$host]:$port" 2>/dev/null || true
+    fi
+    
+    debug_log "Cleaned up known_hosts entries for $host:$port"
+}
+
 # Initialize connections registry with clean JSON structure
 initialize_connections_registry() {
     if [[ ! -f "$CONNECTIONS_REGISTRY" ]]; then
@@ -1270,7 +1289,8 @@ delete_global_key_system() {
                     local our_key_material=$(cut -d' ' -f2 "$GLOBAL_SSH_PUB_KEY_PATH" 2>/dev/null)
                     if [[ -n "$our_key_material" ]]; then
                         # Use SSH to remove our key from remote authorized_keys
-                        if timeout 30 ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "$port" "${username}@${host}" \
+                        local ssh_bypass_options=$(get_ssh_bypass_options)
+                        if timeout 30 ssh $ssh_bypass_options -o ConnectTimeout=10 -p "$port" "${username}@${host}" \
                            "sed -i '/$our_key_material/d' ~/.ssh/authorized_keys 2>/dev/null; echo 'Key removal attempted'" >/dev/null 2>&1; then
                             log_info "    ✓ Successfully removed global key access from ${username}@${host}:${port}"
                             keys_removed=$((keys_removed + 1))
@@ -1306,7 +1326,17 @@ delete_global_key_system() {
         log_info "    ✓ Removed registry: $GLOBAL_KEYS_REGISTRY"
     fi
     
-    # Step 4: Generate summary
+    # Step 4: Clean up known_hosts entries for all servers
+    log_info "🔄 Cleaning up known_hosts entries for servers..."
+    if [[ -n "$servers_list" ]]; then
+        while IFS=':' read -r host port username; do
+            [[ -z "$host" ]] && continue
+            cleanup_known_hosts_entry "$host" "$port"
+        done <<< "$servers_list"
+        log_info "    ✓ Cleaned up known_hosts entries for all servers"
+    fi
+    
+    # Step 5: Generate summary
     log_info ""
     log_info "🎯 Global SSH Key System Deletion Complete!"
     log_info "📊 Summary:"
@@ -1378,7 +1408,8 @@ revoke_global_key_from_server() {
         log_info "🔄 Attempting to remove global SSH key from remote server..."
         
         # Use SSH to remove our key from remote authorized_keys
-        if timeout 30 ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "$port" "${username}@${host}" \
+        local ssh_bypass_options=$(get_ssh_bypass_options)
+        if timeout 30 ssh $ssh_bypass_options -o ConnectTimeout=10 -p "$port" "${username}@${host}" \
            "sed -i '/$our_key_material/d' ~/.ssh/authorized_keys 2>/dev/null && echo 'Key removal attempted'" >/dev/null 2>&1; then
             log_info "✓ Successfully removed global SSH key from remote server"
             key_removal_success=true
@@ -1386,6 +1417,10 @@ revoke_global_key_from_server() {
             log_info "⚠️ Could not remove key from remote server (SSH connection failed)"
         fi
     fi
+    
+    # Clean up known_hosts entry for this server
+    log_info "🔄 Cleaning up known_hosts entry..."
+    cleanup_known_hosts_entry "$host" "$port"
     
     # Always remove from local registry, regardless of remote removal success
     log_info "🔄 Removing server from global keys registry..."
@@ -2162,7 +2197,8 @@ revoke_connection_full() {
     log_info "Key material: ${our_key_material:0:20}...${our_key_material: -20}"
     
     # Test connection first using individual key
-    if ! ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
+    local ssh_bypass_options=$(get_ssh_bypass_options)
+    if ! ssh -i "$private_key" -p "$port" $ssh_bypass_options -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=5 "${username}@${host}" true 2>/dev/null; then
         log_info "⚠ Cannot connect to ${username}@${host}:${port} using individual key - server may be offline"
         log_info "Performing local cleanup only..."
         revoke_connection_local "$conn_id"
@@ -2209,13 +2245,15 @@ EOF
     
     # Execute remote script using individual key
     local ssh_output
-    ssh_output=$(ssh -i "$private_key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=10 "${username}@${host}" "bash -s '$our_key_material'" <<< "$remote_script" 2>&1)
+    ssh_output=$(ssh -i "$private_key" -p "$port" $ssh_bypass_options -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=10 "${username}@${host}" "bash -s '$our_key_material'" <<< "$remote_script" 2>&1)
     local ssh_exit_code=$?
     
     log_info "Remote script output: $ssh_output"
     
     if [[ $ssh_exit_code -eq 0 ]]; then
         log_info "Successfully removed individual key from remote server"
+        # Clean up known_hosts entry for this server
+        cleanup_known_hosts_entry "$host" "$port"
         # Now perform local cleanup
         revoke_connection_local "$conn_id"
         return 0
