@@ -1404,35 +1404,51 @@ list_authorized_keys() {
         local key_data=$(echo "$line" | awk '{print $2}')
         local key_comment=$(echo "$line" | awk '{for(i=3; i<=NF; i++) printf "%s ", $i}' | sed 's/[[:space:]]*$//')
         
-        # Extract user and hostname from comment (user@hostname format)
+        # Extract user and hostname from comment (multiple formats supported)
         local user_info=""
         local hostname=""
+        local ping_target=""
         
         if [[ "$key_comment" =~ (.+)@(.+) ]]; then
             user_info="${BASH_REMATCH[1]}"
             hostname="${BASH_REMATCH[2]}"
+            ping_target="$hostname"
+        elif [[ "$key_comment" =~ PAIR-from-.*-to-.*@([0-9-]+):.*-[0-9]+ ]]; then
+            # Handle PAIR format: PAIR-from-x-wing-to-root@10-10-20-199:22-20250508135217
+            local ip_with_dashes="${BASH_REMATCH[1]}"
+            ping_target="${ip_with_dashes//-/.}"  # Convert 10-10-20-199 to 10.10.20.199
+            hostname="$ping_target"
+            user_info="PAIR connection"
+        elif [[ "$key_comment" =~ Global\ SSH\ Key\ \((.+)\) ]]; then
+            # Handle Global SSH Key (hostname) format
+            hostname="${BASH_REMATCH[1]}"
+            ping_target="$hostname"
+            user_info="Global key"
         elif [[ -n "$key_comment" ]]; then
-            # If no @ symbol, use entire comment as hostname
+            # If no specific pattern, use entire comment as hostname
             hostname="$key_comment"
+            ping_target="$key_comment"
             user_info="unknown"
         else
             hostname="Unknown Host"
             user_info="unknown"
+            ping_target=""
         fi
         
         # Test connectivity to determine active/inactive status
         local status_color="#28a745"
         local status_text="✓ Active"
         
-        if [[ "$hostname" != "Unknown Host" ]] && [[ "$hostname" != *"localhost"* ]]; then
-            # Try to ping the hostname (quick test)
-            if ! ping -c 1 -W 2 "$hostname" >/dev/null 2>&1; then
+        if [[ -n "$ping_target" ]] && [[ "$ping_target" != "Unknown Host" ]] && [[ "$ping_target" != *"localhost"* ]]; then
+            # Try to ping the extracted target (quick test with 1 second timeout for speed)
+            if ! timeout 1 ping -c 1 -W 1 "$ping_target" >/dev/null 2>&1; then
                 status_color="#dc3545"
                 status_text="✗ Inactive"
             fi
         else
-            status_color="#ffc107"
-            status_text="? Unknown"
+            # No pingable target found - show no status
+            status_color="#6c757d"
+            status_text=""
         fi
         
         # Generate unique ID for this key (using line number)
@@ -1448,8 +1464,12 @@ list_authorized_keys() {
         echo "      <div style='font-size: 11px; color: #888; margin-top: 2px;'>Key Type: $key_type</div>"
         echo "    </div>"
         echo "    <div style='display: flex; align-items: center; gap: 15px;'>"
-        echo "      <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
-        echo "      <button onclick='deleteAuthorizedKey(\"$key_id\", \"$hostname\", $line_number)' style='background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;' title='Remove authorized key'>Remove</button>"
+        if [[ -n "$status_text" ]]; then
+            echo "      <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
+        else
+            echo "      <div></div>"  # Empty div to maintain spacing
+        fi
+        echo "      <button onclick='deleteAuthorizedKey(\"$key_id\", \"$hostname\", $line_number)' style='background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;' title='Revoke SSH access'>REVOKE ACCESS</button>"
         echo "    </div>"
         echo "  </div>"
         echo "</div>"
