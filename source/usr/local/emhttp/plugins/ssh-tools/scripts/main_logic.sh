@@ -1413,10 +1413,9 @@ list_authorized_keys() {
             user_info="${BASH_REMATCH[1]}"
             hostname="${BASH_REMATCH[2]}"
             ping_target="$hostname"
-        elif [[ "$key_comment" =~ PAIR-from-.*-to-.*@([0-9-]+):.*-[0-9]+ ]]; then
-            # Handle PAIR format: PAIR-from-x-wing-to-root@10-10-20-199:22-20250508135217
-            local ip_with_dashes="${BASH_REMATCH[1]}"
-            ping_target="${ip_with_dashes//-/.}"  # Convert 10-10-20-199 to 10.10.20.199
+        elif [[ "$key_comment" =~ PAIR-from-([^-]+)-to-.* ]]; then
+            # Handle PAIR format: PAIR-from-basestar-to-root@10-10-20-194:22-20250808083831
+            ping_target="${BASH_REMATCH[1]}"  # Extract source hostname 'basestar'
             hostname="$ping_target"
             user_info="PAIR connection"
         elif [[ "$key_comment" =~ Global\ SSH\ Key\ \((.+)\) ]]; then
