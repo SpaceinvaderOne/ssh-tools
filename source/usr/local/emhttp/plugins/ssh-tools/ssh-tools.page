@@ -1008,6 +1008,105 @@ function deleteGlobalKey() {
   });
 }
 
+function revokeGlobalKey(host, username, port) {
+  const displayHost = (port && port != '22') ? host + ':' + port : host;
+  
+  swal({
+    title: 'Revoke Global SSH Access?',
+    html: true,
+    text: '<div style="text-align: left;">' +
+          '<p>Remove global SSH key access from:</p>' +
+          '<p><strong>' + displayHost + '</strong> (User: ' + username + ')</p>' +
+          '<br>' +
+          '<p>This will:</p>' +
+          '<ul style="margin: 10px 0; padding-left: 20px;">' +
+          '<li>Remove the global SSH key from the remote server</li>' +
+          '<li>Remove this server from your global keys registry</li>' +
+          '<li>Test server connectivity before removal</li>' +
+          '</ul>' +
+          '<p><strong>Note:</strong> Other servers using the global key will remain unaffected.</p>' +
+          '</div>',
+    type: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#d33',
+    confirmButtonText: 'Yes, Revoke Access',
+    cancelButtonText: 'Cancel',
+    closeOnConfirm: false
+  }, function(isConfirm) {
+    if (isConfirm) {
+      // Show processing modal
+      swal({
+        title: 'Revoking Access...',
+        text: 'Testing connectivity and removing global SSH key from ' + displayHost + '...',
+        type: 'info',
+        showConfirmButton: false,
+        allowOutsideClick: false
+      });
+      
+      // Execute the global key revocation for specific server
+      executeOperation('revoke_global_key_from_server', {
+        host: host,
+        username: username,
+        port: port
+      }, function(response) {
+        console.log('Global key revocation response:', response);
+        
+        if (response.toLowerCase().includes('successfully')) {
+          swal({
+            title: 'Access Revoked!',
+            html: 'Global SSH key access has been successfully revoked for <strong>' + displayHost + '</strong>.<br><br>' +
+                  '✓ Key removed from remote server<br>' +
+                  '✓ Server removed from global keys registry<br>' +
+                  '✓ Other servers using global key remain active<br><br>' +
+                  'This server can no longer use the global SSH key for access.',
+            type: 'success',
+            confirmButtonText: 'Continue'
+          }, function() {
+            // Refresh the global keys display
+            refreshGlobalKeys();
+          });
+        } else if (response.includes('SERVER_UNREACHABLE:')) {
+          swal({
+            title: 'Server Unreachable',
+            html: 'Could not connect to <strong>' + displayHost + '</strong> to remove the SSH key.<br><br>' +
+                  'The server has been removed from your global keys registry, but the SSH key may still exist on the remote server.<br><br>' +
+                  'You may need to manually remove the key when the server is available.',
+            type: 'warning',
+            confirmButtonText: 'OK'
+          }, function() {
+            refreshGlobalKeys();
+          });
+        } else if (response.includes('KEY_NOT_FOUND:')) {
+          swal({
+            title: 'Key Not Found',
+            html: 'The global SSH key was not found on <strong>' + displayHost + '</strong>.<br><br>' +
+                  'The server has been removed from your global keys registry.',
+            type: 'info',
+            confirmButtonText: 'OK'
+          }, function() {
+            refreshGlobalKeys();
+          });
+        } else {
+          swal({
+            title: 'Revocation Failed',
+            html: 'Failed to revoke global SSH key access for <strong>' + displayHost + '</strong>.<br><br>' +
+                  'Error details:<br>' + response.replace(/\n/g, '<br>'),
+            type: 'error',
+            confirmButtonText: 'OK'
+          });
+        }
+      }, function(error) {
+        swal({
+          title: 'Error',
+          text: 'Failed to process revocation request: ' + error,
+          type: 'error',
+          confirmButtonText: 'OK'
+        });
+      });
+    }
+  });
+}
+
 function testAllConnections() {
   updateStatus('Testing all exchanged connections...');
   executeOperation('test_all_connections', {});

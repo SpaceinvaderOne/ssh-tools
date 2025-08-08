@@ -244,6 +244,43 @@ switch ($operation) {
         // No additional parameters needed
         break;
         
+    case 'revoke_global_key_from_server':
+        if (isset($_POST['host'])) {
+            $validation = validateInput($_POST['host'], 'host');
+            if (isset($validation['error'])) {
+                echo "Error: " . $validation['error'];
+                exit;
+            }
+            $env['REMOTE_HOST'] = $validation['value'];
+        } else {
+            echo "Error: Host is required";
+            exit;
+        }
+        
+        if (isset($_POST['username'])) {
+            $validation = validateInput($_POST['username'], 'username');
+            if (isset($validation['error'])) {
+                echo "Error: " . $validation['error'];
+                exit;
+            }
+            $env['REMOTE_USERNAME'] = $validation['value'];
+        } else {
+            echo "Error: Username is required";
+            exit;
+        }
+        
+        if (isset($_POST['port'])) {
+            $port = intval($_POST['port']);
+            if ($port < 1 || $port > 65535) {
+                echo "Error: Port must be between 1 and 65535";
+                exit;
+            }
+            $env['REMOTE_PORT'] = $port;
+        } else {
+            $env['REMOTE_PORT'] = 22;
+        }
+        break;
+        
     case 'add_external_connection':
         if (isset($_POST['host'])) {
             $validation = validateInput($_POST['host'], 'host');

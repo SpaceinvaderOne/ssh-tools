@@ -1178,20 +1178,13 @@ list_global_keys() {
                 created_display=$(date -d "$created" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$created")
             fi
             
-            echo "<div style='margin-bottom: 15px; padding: 15px; border: 2px solid #ffc107; border-radius: 8px; background: #fff8e1;'>"
-            echo "  <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;'>"
-            echo "    <div>"
-            echo "      <strong style='color: #333;'>Global SSH Key</strong>"
-            echo "      <span style='color: #666; margin-left: 10px;'>Active on $server_count server(s)</span>"
-            echo "      <div style='font-size: 11px; color: #888; margin-top: 2px;'>Created: $created_display</div>"
-            echo "    </div>"
-            echo "    <div>"
-            echo "      <button onclick=\"revokeGlobalKey('$key_id')\" style='background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: bold;' title='Revoke all global SSH access'>REVOKE ACCESS</button>"
-            echo "    </div>"
-            echo "  </div>"
+            # Global key summary info - just text, no background container
+            echo "<div style='margin-bottom: 15px; color: #666; font-size: 14px;'>"
+            echo "  <strong>Global SSH Key System:</strong> Active on $server_count server(s)"
+            echo "  <div style='font-size: 12px; color: #888; margin-top: 2px;'>Created: $created_display</div>"
+            echo "</div>"
             
-            # List servers using this global key
-            echo "  <div style='margin-top: 10px;'>"
+            # List servers using this global key - each in individual white rectangles
             local servers_json=$(echo "$global_key" | jq -c '.servers[]?')
             if [[ -n "$servers_json" ]]; then
                 echo "$servers_json" | while IFS= read -r server; do
@@ -1207,31 +1200,39 @@ list_global_keys() {
                         display_host="${host}:${port}"
                     fi
                     
-                    # Determine status color and text
+                    # Determine status color and text with real-time ping test (like authorized keys)
                     local status_color="#666"
-                    local status_text="Unknown"
+                    local status_text="Testing..."
                     
-                    if [[ "$status" == "active" ]]; then
+                    # Test connectivity with mDNS fallback (matching authorized keys behavior)
+                    local ping_target="$host"
+                    if timeout 1 ping -c 1 -W 1 "$ping_target" >/dev/null 2>&1; then
                         status_color="#28a745"
                         status_text="✓ Active"
-                    elif [[ "$status" == "inactive" ]]; then
+                    elif timeout 1 ping -c 1 -W 1 "${ping_target}.local" >/dev/null 2>&1; then
+                        status_color="#28a745"  
+                        status_text="✓ Active"
+                    else
                         status_color="#dc3545"
                         status_text="✗ Inactive"
                     fi
                     
-                    echo "    <div style='margin-bottom: 8px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa;'>"
-                    echo "      <div style='display: flex; justify-content: space-between; align-items: center;'>"
-                    echo "        <div>"
-                    echo "          <strong style='color: #333;'>$display_host</strong>"
-                    echo "          <span style='color: #666; margin-left: 10px;'>User: $username</span>"
-                    echo "        </div>"
-                    echo "        <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
-                    echo "      </div>"
+                    # White rectangle matching other sections exactly
+                    echo "<div style='margin-bottom: 10px; padding: 12px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa;'>"
+                    echo "  <div style='display: flex; justify-content: space-between; align-items: center;'>"
+                    echo "    <div>"
+                    echo "      <strong style='color: #333;'>$display_host</strong>"
+                    echo "      <span style='color: #666; margin-left: 10px;'>User: $username</span>"
+                    echo "      <div style='font-size: 11px; color: #888; margin-top: 2px;'>Global Key Access</div>"
                     echo "    </div>"
+                    echo "    <div style='display: flex; align-items: center; gap: 15px;'>"
+                    echo "      <div style='color: $status_color; font-weight: bold; font-size: 12px;'>$status_text</div>"
+                    echo "      <button onclick=\"revokeGlobalKey('$host', '$username', '$port')\" style='background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;' title='Revoke global SSH access from this server'>REVOKE ACCESS</button>"
+                    echo "    </div>"
+                    echo "  </div>"
+                    echo "</div>"
                 done
             fi
-            echo "  </div>"
-            echo "</div>"
         done
     fi
     
@@ -1323,6 +1324,110 @@ delete_global_key_system() {
     log_info ""
     log_info "✨ The global SSH key system has been completely removed."
     log_info "   You can create a new global key system anytime using the Exchange Keys tab."
+}
+
+# Revoke global SSH key access from a specific server
+revoke_global_key_from_server() {
+    local host="$1"
+    local username="$2"
+    local port="${3:-22}"
+    
+    log_info "🔄 Revoking global SSH key access from ${username}@${host}:${port}..."
+    
+    # Check if global keys registry exists
+    if [[ ! -f "$GLOBAL_KEYS_REGISTRY" ]]; then
+        log_info "❌ No global keys registry found"
+        return 1
+    fi
+    
+    # Check if jq is available
+    if ! command -v jq >/dev/null 2>&1; then
+        log_info "❌ jq is required for global key management"
+        return 1
+    fi
+    
+    # Check if global SSH key exists
+    if [[ ! -f "$GLOBAL_SSH_PUB_KEY_PATH" ]]; then
+        log_info "❌ Global SSH key not found: $GLOBAL_SSH_PUB_KEY_PATH"
+        return 1
+    fi
+    
+    # Get our global key material for matching
+    local our_key_material=$(cut -d' ' -f2 "$GLOBAL_SSH_PUB_KEY_PATH" 2>/dev/null)
+    if [[ -z "$our_key_material" ]]; then
+        log_info "❌ Could not read global SSH key material"
+        return 1
+    fi
+    
+    # Test connectivity first (with mDNS fallback)
+    local server_reachable=false
+    if timeout 3 ping -c 1 -W 1 "$host" >/dev/null 2>&1; then
+        server_reachable=true
+        log_info "✓ Server $host is reachable"
+    elif timeout 3 ping -c 1 -W 1 "${host}.local" >/dev/null 2>&1; then
+        server_reachable=true
+        log_info "✓ Server ${host}.local is reachable (mDNS)"
+    else
+        log_info "⚠️ Server $host is unreachable"
+    fi
+    
+    local key_removal_success=false
+    
+    # Attempt to remove key from remote server if reachable
+    if [[ "$server_reachable" == "true" ]]; then
+        log_info "🔄 Attempting to remove global SSH key from remote server..."
+        
+        # Use SSH to remove our key from remote authorized_keys
+        if timeout 30 ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "$port" "${username}@${host}" \
+           "sed -i '/$our_key_material/d' ~/.ssh/authorized_keys 2>/dev/null && echo 'Key removal attempted'" >/dev/null 2>&1; then
+            log_info "✓ Successfully removed global SSH key from remote server"
+            key_removal_success=true
+        else
+            log_info "⚠️ Could not remove key from remote server (SSH connection failed)"
+        fi
+    fi
+    
+    # Always remove from local registry, regardless of remote removal success
+    log_info "🔄 Removing server from global keys registry..."
+    
+    # Create temporary file for updated registry
+    local temp_registry=$(mktemp)
+    
+    # Remove the specific server from the registry
+    jq --arg host "$host" --arg username "$username" --argjson port "$port" '
+    .servers = (.servers // [] | map(select(not(.host == $host and .username == $username and (.port // 22) == $port))))
+    | .last_updated = now | strftime("%Y-%m-%dT%H:%M:%S%z")
+    ' "$GLOBAL_KEYS_REGISTRY" > "$temp_registry"
+    
+    # Replace the original registry
+    if mv "$temp_registry" "$GLOBAL_KEYS_REGISTRY" 2>/dev/null; then
+        chmod 644 "$GLOBAL_KEYS_REGISTRY" 2>/dev/null || true
+        log_info "✓ Server removed from global keys registry"
+    else
+        rm -f "$temp_registry" 2>/dev/null
+        log_info "❌ Failed to update global keys registry"
+        return 1
+    fi
+    
+    # Generate appropriate response based on what happened
+    if [[ "$server_reachable" == "true" ]] && [[ "$key_removal_success" == "true" ]]; then
+        log_info ""
+        log_info "✅ Global SSH key access successfully revoked from ${username}@${host}:${port}"
+        log_info "   • Key removed from remote server"
+        log_info "   • Server removed from global keys registry"
+        log_info "   • Other servers using global key remain active"
+    elif [[ "$server_reachable" == "false" ]]; then
+        log_info ""
+        log_info "⚠️ SERVER_UNREACHABLE: Could not connect to ${host}"
+        log_info "   • Server removed from global keys registry"
+        log_info "   • SSH key may still exist on remote server"
+        log_info "   • Manual removal may be required when server is available"
+    else
+        log_info ""
+        log_info "⚠️ Global SSH key revocation completed with warnings for ${username}@${host}:${port}"
+        log_info "   • Server removed from global keys registry"
+        log_info "   • Could not confirm key removal from remote server"
+    fi
 }
 
 # Test all previously exchanged connections using individual keys
@@ -1910,6 +2015,12 @@ process_operation() {
             ;;
         "delete_global_key_system")
             delete_global_key_system
+            ;;
+        "revoke_global_key_from_server")
+            if [[ -z "$REMOTE_HOST" ]] || [[ -z "$REMOTE_USERNAME" ]]; then
+                error_exit "Missing required parameters for global key revocation"
+            fi
+            revoke_global_key_from_server "$REMOTE_HOST" "$REMOTE_USERNAME" "$REMOTE_PORT"
             ;;
         "test_all_connections")
             test_all_connections
