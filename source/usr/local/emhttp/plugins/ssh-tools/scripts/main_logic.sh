@@ -1409,11 +1409,7 @@ list_authorized_keys() {
         local hostname=""
         local ping_target=""
         
-        if [[ "$key_comment" =~ (.+)@(.+) ]]; then
-            user_info="${BASH_REMATCH[1]}"
-            hostname="${BASH_REMATCH[2]}"
-            ping_target="$hostname"
-        elif [[ "$key_comment" =~ PAIR-from-([^-]+)-to-.* ]]; then
+        if [[ "$key_comment" =~ PAIR-from-([^-]+)-to-.* ]]; then
             # Handle PAIR format: PAIR-from-basestar-to-root@10-10-20-194:22-20250808083831
             ping_target="${BASH_REMATCH[1]}"  # Extract source hostname 'basestar'
             hostname="$ping_target"
@@ -1423,6 +1419,11 @@ list_authorized_keys() {
             hostname="${BASH_REMATCH[1]}"
             ping_target="$hostname"
             user_info="Global key"
+        elif [[ "$key_comment" =~ (.+)@(.+) ]]; then
+            # Handle standard user@hostname format (generic fallback)
+            user_info="${BASH_REMATCH[1]}"
+            hostname="${BASH_REMATCH[2]}"
+            ping_target="$hostname"
         elif [[ -n "$key_comment" ]]; then
             # If no specific pattern, use entire comment as hostname
             hostname="$key_comment"
