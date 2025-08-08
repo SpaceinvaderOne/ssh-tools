@@ -240,6 +240,7 @@ switch ($operation) {
     case 'test_all_connections':
     case 'list_authorized_keys':
     case 'list_global_keys':
+    case 'delete_global_key_system':
         // No additional parameters needed
         break;
         

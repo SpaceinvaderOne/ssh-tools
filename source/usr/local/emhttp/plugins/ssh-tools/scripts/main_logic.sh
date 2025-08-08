@@ -1238,6 +1238,93 @@ list_global_keys() {
     echo "</div>"
 }
 
+# Delete entire global SSH key system
+delete_global_key_system() {
+    log_info "🗑️ Starting complete global SSH key system deletion..."
+    
+    local errors_occurred=0
+    local servers_processed=0
+    local keys_removed=0
+    
+    # Get list of servers from global keys registry before deletion
+    local servers_list=""
+    if [[ -f "$GLOBAL_KEYS_REGISTRY" ]] && command -v jq >/dev/null 2>&1; then
+        servers_list=$(jq -r '.servers[]? | "\(.host):\(.port // 22):\(.username)"' "$GLOBAL_KEYS_REGISTRY" 2>/dev/null)
+    fi
+    
+    # Step 1: Remove global SSH keys from all remote servers
+    if [[ -n "$servers_list" ]]; then
+        log_info "🔄 Removing global SSH access from remote servers..."
+        
+        while IFS=':' read -r host port username; do
+            [[ -z "$host" || -z "$username" ]] && continue
+            
+            servers_processed=$((servers_processed + 1))
+            log_info "  → Processing ${username}@${host}:${port}"
+            
+            # Test connectivity first
+            if timeout 3 ping -c 1 -W 1 "$host" >/dev/null 2>&1 || timeout 3 ping -c 1 -W 1 "${host}.local" >/dev/null 2>&1; then
+                # Try to remove the key using SSH
+                if [[ -f "$GLOBAL_SSH_PUB_KEY_PATH" ]]; then
+                    local our_key_material=$(cut -d' ' -f2 "$GLOBAL_SSH_PUB_KEY_PATH" 2>/dev/null)
+                    if [[ -n "$our_key_material" ]]; then
+                        # Use SSH to remove our key from remote authorized_keys
+                        if timeout 30 ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no -p "$port" "${username}@${host}" \
+                           "sed -i '/$our_key_material/d' ~/.ssh/authorized_keys 2>/dev/null; echo 'Key removal attempted'" >/dev/null 2>&1; then
+                            log_info "    ✓ Successfully removed global key access from ${username}@${host}:${port}"
+                            keys_removed=$((keys_removed + 1))
+                        else
+                            log_info "    ⚠️ Could not remove global key from ${username}@${host}:${port} (connection failed)"
+                            errors_occurred=1
+                        fi
+                    fi
+                fi
+            else
+                log_info "    ⚠️ Server ${host} unreachable - key may remain on remote server"
+                errors_occurred=1
+            fi
+        done <<< "$servers_list"
+    fi
+    
+    # Step 2: Remove local global SSH key files
+    log_info "🔄 Removing local global SSH key files..."
+    if [[ -f "$GLOBAL_SSH_KEY_PATH" ]]; then
+        rm -f "$GLOBAL_SSH_KEY_PATH" 2>/dev/null
+        log_info "    ✓ Removed private key: $GLOBAL_SSH_KEY_PATH"
+    fi
+    
+    if [[ -f "$GLOBAL_SSH_PUB_KEY_PATH" ]]; then
+        rm -f "$GLOBAL_SSH_PUB_KEY_PATH" 2>/dev/null
+        log_info "    ✓ Removed public key: $GLOBAL_SSH_PUB_KEY_PATH"
+    fi
+    
+    # Step 3: Remove global keys registry
+    log_info "🔄 Removing global keys registry..."
+    if [[ -f "$GLOBAL_KEYS_REGISTRY" ]]; then
+        rm -f "$GLOBAL_KEYS_REGISTRY" 2>/dev/null
+        log_info "    ✓ Removed registry: $GLOBAL_KEYS_REGISTRY"
+    fi
+    
+    # Step 4: Generate summary
+    log_info ""
+    log_info "🎯 Global SSH Key System Deletion Complete!"
+    log_info "📊 Summary:"
+    log_info "    • Servers processed: $servers_processed"
+    log_info "    • Keys successfully removed: $keys_removed"
+    log_info "    • Local files removed: SSH key pair + registry"
+    
+    if [[ $errors_occurred -eq 1 ]]; then
+        log_info "    ⚠️ Some remote servers were unreachable"
+        log_info "    💡 SSH keys may still exist on unreachable servers"
+    else
+        log_info "    ✅ All operations completed successfully"
+    fi
+    
+    log_info ""
+    log_info "✨ The global SSH key system has been completely removed."
+    log_info "   You can create a new global key system anytime using the Exchange Keys tab."
+}
+
 # Test all previously exchanged connections using individual keys
 test_all_connections() {
     if [[ ! -f "$CONNECTIONS_REGISTRY" ]]; then
@@ -1820,6 +1907,9 @@ process_operation() {
             ;;
         "list_global_keys")
             list_global_keys
+            ;;
+        "delete_global_key_system")
+            delete_global_key_system
             ;;
         "test_all_connections")
             test_all_connections

@@ -173,41 +173,25 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
   
   <p>View and manage your SSH key connections and access permissions.</p>
   
-  <dl>
-    <dt>&nbsp;</dt>
-    <dd>
-      <span class="buttons-spaced">
-        <button type="button" onclick="refreshExchangedKeys()">Refresh Lists</button>
-        <button type="button" onclick="testAllConnections()">Test All Connections</button>
-      </span>
-      <div class="description">Refresh both lists and test connectivity</div>
-    </dd>
-  </dl>
-  
   <div style="margin-top: 20px;">
-    <h3>Authorized SSH Keys</h3>
-    <p>Machines that are authorized to connect to this server</p>
-    <dl>
-      <dt>&nbsp;</dt>
-      <dd>
-        <span class="buttons-spaced">
-          <button type="button" onclick="refreshAuthorizedKeys()">Refresh List</button>
-        </span>
-        <div class="description">Manage machines authorized to connect to your server</div>
-      </dd>
-    </dl>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+      <h3 style="margin: 0;">Authorized SSH Keys</h3>
+      <button type="button" onclick="refreshAuthorizedKeys()" style="background: #F15A2C; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-size: 12px;">REFRESH LIST</button>
+    </div>
     <div id="authorizedKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
       Loading authorized keys...
     </div>
   </div>
   
-  <div style="margin-top: 20px;">
+  <div style="margin-top: 30px;">
     <h3>Exchanged SSH Keys</h3>
-    <p>Track and manage machines where SSH keys have been successfully exchanged.</p>
     
     <!-- Key Pairs Section -->
-    <div style="margin-bottom: 25px;">
-      <h4>Successfully Exchanged Keys: Keypairs</h4>
+    <div style="margin-bottom: 25px; margin-top: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h4 style="margin: 0;">Keypairs</h4>
+        <button type="button" onclick="refreshExchangedKeys()" style="background: #F15A2C; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-size: 12px;">REFRESH LIST</button>
+      </div>
       <div id="exchangedKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
         Loading exchanged keys...
       </div>
@@ -215,9 +199,12 @@ Comprehensive SSH key management for Unraid. Easily exchange SSH keys with remot
     
     <!-- Global Keys Section -->
     <div style="margin-bottom: 25px;">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <h4 style="margin: 0;">Successfully Exchanged Keys: Global keys</h4>
-        <button type="button" onclick="revokeGlobalKeys()" style="background: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px;" title="Revoke all global SSH access">REVOKE ACCESS</button>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h4 style="margin: 0;">Global keys</h4>
+        <div style="display: flex; gap: 10px;">
+          <button type="button" onclick="deleteGlobalKey()" style="background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-size: 12px;" title="Delete global SSH key system">DELETE GLOBAL KEY</button>
+          <button type="button" onclick="refreshGlobalKeys()" style="background: #F15A2C; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-size: 12px;">REFRESH LIST</button>
+        </div>
       </div>
       <div id="globalKeysList" style="padding: 15px; border-radius: 5px; border: 1px solid #ccc; min-height: 100px;">
         Loading global keys...
@@ -972,6 +959,52 @@ function revokeGlobalKeys() {
       type: 'info',
       confirmButtonText: 'OK'
     });
+  });
+}
+
+function deleteGlobalKey() {
+  swal({
+    title: 'Delete Global SSH Key System?',
+    html: true,
+    text: '<div style="text-align: left;">' +
+          '<p><strong>⚠️ WARNING: This action cannot be undone!</strong></p>' +
+          '<p>This will completely remove:</p>' +
+          '<ul style="margin: 10px 0; padding-left: 20px;">' +
+          '<li>Global SSH key files from this server</li>' +
+          '<li>All global key registry records</li>' +
+          '<li>Global SSH access from ALL remote servers</li>' +
+          '</ul>' +
+          '<p>After deletion, you will need to exchange new keys to restore access.</p>' +
+          '</div>',
+    type: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#d33',
+    confirmButtonText: 'Yes, Delete Everything',
+    cancelButtonText: 'Cancel',
+    closeOnConfirm: false
+  }, function(isConfirm) {
+    if (isConfirm) {
+      // Execute the global key system deletion
+      executeOperation('delete_global_key_system', {}, function(response) {
+        swal({
+          title: 'Global Key System Deleted',
+          text: 'The global SSH key system has been completely removed. All registry records have been cleared.',
+          type: 'success',
+          confirmButtonText: 'OK'
+        }, function() {
+          // Refresh the interface to show empty state
+          refreshGlobalKeys();
+          checkKeyStatus();
+        });
+      }, function(error) {
+        swal({
+          title: 'Deletion Failed',
+          text: 'Failed to delete global key system: ' + error,
+          type: 'error',
+          confirmButtonText: 'OK'
+        });
+      });
+    }
   });
 }
 
