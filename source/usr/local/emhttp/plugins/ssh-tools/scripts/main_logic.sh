@@ -1025,7 +1025,7 @@ exchange_global_ssh_key() {
     
     # Test the global key SSH access
     log_info "🔍 Testing global key SSH access..."
-    if ssh -i "$GLOBAL_SSH_KEY_PATH" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${username}@${host}" true >/dev/null 2>&1; then
+    if ssh -p "$port" -o BatchMode=yes -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${username}@${host}" true >/dev/null 2>&1; then
         log_info "✅ Global SSH key access verified"
     else
         error_exit "Global SSH key was installed but access test failed"
@@ -1270,8 +1270,8 @@ delete_global_key_system() {
                 if [[ -f "$GLOBAL_SSH_PUB_KEY_PATH" ]]; then
                     local our_key_material=$(cut -d' ' -f2 "$GLOBAL_SSH_PUB_KEY_PATH" 2>/dev/null)
                     if [[ -n "$our_key_material" ]]; then
-                        # Use SSH to remove our key from remote authorized_keys (explicit global key)
-                        if timeout 30 ssh -i "$GLOBAL_SSH_KEY_PATH" -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o IdentityAgent=none -o ConnectTimeout=10 "${username}@${host}" \
+                        # Use SSH to remove our key from remote authorized_keys (use default key discovery)
+                        if timeout 30 ssh -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 "${username}@${host}" \
                            "sed -i '/$our_key_material/d' ~/.ssh/authorized_keys 2>/dev/null; echo 'Key removal attempted'" >/dev/null 2>&1; then
                             log_info "    ✓ Successfully removed global key access from ${username}@${host}:${port}"
                             keys_removed=$((keys_removed + 1))
@@ -1378,8 +1378,8 @@ revoke_global_key_from_server() {
     if [[ "$server_reachable" == "true" ]]; then
         log_info "🔄 Attempting to remove global SSH key from remote server..."
         
-        # Use SSH to remove our key from remote authorized_keys (explicit global key)
-        if timeout 30 ssh -i "$GLOBAL_SSH_KEY_PATH" -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o IdentityAgent=none -o ConnectTimeout=10 "${username}@${host}" \
+        # Use SSH to remove our key from remote authorized_keys (use default key discovery)
+        if timeout 30 ssh -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 "${username}@${host}" \
            "sed -i '/$our_key_material/d' ~/.ssh/authorized_keys 2>/dev/null && echo 'Key removal attempted'" >/dev/null 2>&1; then
             log_info "✓ Successfully removed global SSH key from remote server"
             key_removal_success=true
