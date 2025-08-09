@@ -47,9 +47,14 @@ EOF
 # Initialize global keys registry with clean JSON structure
 initialize_global_keys_registry() {
     if [[ ! -f "$GLOBAL_KEYS_REGISTRY" ]]; then
-        # Ensure .ssh directory exists
-        mkdir -p "$(dirname "$GLOBAL_KEYS_REGISTRY")" 2>/dev/null || true
+        log_info "🔧 DEBUG: Initializing global keys registry at: $GLOBAL_KEYS_REGISTRY"
         
+        # Ensure .ssh directory exists
+        local registry_dir=$(dirname "$GLOBAL_KEYS_REGISTRY")
+        log_info "🔧 DEBUG: Creating registry directory: $registry_dir"
+        mkdir -p "$registry_dir" 2>/dev/null || true
+        
+        log_info "🔧 DEBUG: Writing initial registry content..."
         cat > "$GLOBAL_KEYS_REGISTRY" << EOF
 {
   "version": "1.0",
@@ -58,8 +63,23 @@ initialize_global_keys_registry() {
   "global_keys": []
 }
 EOF
+        local write_result=$?
+        log_info "🔧 DEBUG: Registry write result: $write_result"
+        
         chmod 644 "$GLOBAL_KEYS_REGISTRY" 2>/dev/null || true
+        
+        # Verify the file was created and has content
+        if [[ -f "$GLOBAL_KEYS_REGISTRY" ]]; then
+            local file_size=$(stat -c%s "$GLOBAL_KEYS_REGISTRY" 2>/dev/null || echo "0")
+            log_info "🔧 DEBUG: Registry file created successfully, size: ${file_size} bytes"
+            log_info "🔧 DEBUG: Registry content preview: $(head -n 3 "$GLOBAL_KEYS_REGISTRY" 2>/dev/null | tr '\n' ' ')"
+        else
+            log_info "❌ DEBUG: Registry file creation failed!"
+        fi
+        
         debug_log "Created global keys registry: $GLOBAL_KEYS_REGISTRY"
+    else
+        log_info "🔧 DEBUG: Registry already exists at: $GLOBAL_KEYS_REGISTRY"
     fi
 }
 
@@ -1025,6 +1045,26 @@ exchange_global_ssh_key() {
     
     # Test the global key SSH access
     log_info "🔍 Testing global key SSH access..."
+    
+    # Add file system verification before SSH test
+    log_info "🔧 FILE VERIFY: Checking global key files before SSH test..."
+    if [[ -f "/root/.ssh/id_ed25519" ]]; then
+        log_info "🔧 FILE VERIFY: Global private key exists with permissions: $(stat -c "%a" /root/.ssh/id_ed25519 2>/dev/null)"
+    else
+        log_info "❌ FILE VERIFY: Global private key missing: /root/.ssh/id_ed25519"
+    fi
+    
+    if [[ -f "/root/.ssh/id_ed25519.pub" ]]; then
+        log_info "🔧 FILE VERIFY: Global public key exists with permissions: $(stat -c "%a" /root/.ssh/id_ed25519.pub 2>/dev/null)"
+    else
+        log_info "❌ FILE VERIFY: Global public key missing: /root/.ssh/id_ed25519.pub"
+    fi
+    
+    # Test with verbose output first
+    log_info "🔧 SSH DEBUG: Testing global key access with verbose output..."
+    local test_verbose_output=$(timeout 10 ssh -v -p "$port" -o BatchMode=yes -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${username}@${host}" "echo 'Global key test'" 2>&1 || true)
+    log_info "🔧 SSH DEBUG: Global key test verbose output (first 500 chars): ${test_verbose_output:0:500}"
+    
     if ssh -p "$port" -o BatchMode=yes -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${username}@${host}" true >/dev/null 2>&1; then
         log_info "✅ Global SSH key access verified"
     else
@@ -1044,6 +1084,8 @@ add_global_key_to_registry() {
     local username="$2"
     local port="$3"
     
+    log_info "🔧 DEBUG: Starting add_global_key_to_registry for ${username}@${host}:${port}"
+    
     if ! command -v jq >/dev/null 2>&1; then
         log_info "⚠ jq not available - global key registry not updated"
         return 0
@@ -1053,36 +1095,76 @@ add_global_key_to_registry() {
     if [[ ! -f "$GLOBAL_KEYS_REGISTRY" ]]; then
         log_info "📁 Creating global keys registry..."
         initialize_global_keys_registry
+        
+        # Verify it was created successfully
+        if [[ ! -f "$GLOBAL_KEYS_REGISTRY" ]]; then
+            log_info "❌ DEBUG: Registry initialization failed - file does not exist"
+            return 1
+        fi
     fi
     
+    # Check current registry state
+    log_info "🔧 DEBUG: Registry file exists, size: $(stat -c%s "$GLOBAL_KEYS_REGISTRY" 2>/dev/null || echo "0") bytes"
+    log_info "🔧 DEBUG: Registry content before changes: $(cat "$GLOBAL_KEYS_REGISTRY" 2>/dev/null | head -n 5 | tr '\n' ' ')"
+    
     local now=$(date -Iseconds)
+    log_info "🔧 DEBUG: Current timestamp: $now"
     
     # Check if a global key entry already exists
+    log_info "🔧 DEBUG: Checking for existing entry..."
     local existing_entry=$(jq --arg host "$host" --arg username "$username" --arg port "$port" \
         '.global_keys[] | select(.servers[]? | select(.host == $host and .username == $username and .port == ($port | tonumber)))' \
         "$GLOBAL_KEYS_REGISTRY" 2>/dev/null)
     
     if [[ -n "$existing_entry" ]]; then
+        log_info "🔧 DEBUG: Found existing entry: ${existing_entry}"
+    else
+        log_info "🔧 DEBUG: No existing entry found"
+    fi
+    
+    if [[ -n "$existing_entry" ]]; then
         # Update existing server entry
+        log_info "🔧 DEBUG: Updating existing server entry..."
         jq --arg host "$host" --arg username "$username" --arg port "$port" --arg now "$now" \
             '(.global_keys[] | .servers[] | select(.host == $host and .username == $username and .port == ($port | tonumber)) | .last_tested) = $now |
              .last_updated = $now' \
-            "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp" && mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+            "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp"
+        
+        local jq_result=$?
+        log_info "🔧 DEBUG: jq update result: $jq_result"
+        
+        if [[ $jq_result -eq 0 ]] && [[ -f "${GLOBAL_KEYS_REGISTRY}.tmp" ]]; then
+            log_info "🔧 DEBUG: Moving temp file to registry..."
+            mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+            local mv_result=$?
+            log_info "🔧 DEBUG: mv result: $mv_result"
             
-        if [[ $? -eq 0 ]]; then
-            log_info "✅ Updated existing server entry in global keys registry"
+            if [[ $mv_result -eq 0 ]]; then
+                log_info "🔧 DEBUG: Registry after update: $(cat "$GLOBAL_KEYS_REGISTRY" 2>/dev/null | head -n 5 | tr '\n' ' ')"
+                log_info "✅ Updated existing server entry in global keys registry"
+            else
+                log_info "❌ DEBUG: Failed to move temp file"
+                rm -f "${GLOBAL_KEYS_REGISTRY}.tmp" 2>/dev/null
+                return 1
+            fi
         else
+            log_info "❌ DEBUG: jq command failed or temp file not created"
             log_info "❌ Failed to update server entry in global keys registry"
             rm -f "${GLOBAL_KEYS_REGISTRY}.tmp" 2>/dev/null
             return 1
         fi
     else
         # Check if any global key entry exists at all
+        log_info "🔧 DEBUG: Checking global key count..."
         local global_key_count=$(jq '.global_keys | length' "$GLOBAL_KEYS_REGISTRY" 2>/dev/null || echo "0")
+        log_info "🔧 DEBUG: Found $global_key_count global key entries"
         
         if [[ "$global_key_count" -eq 0 ]]; then
             # Create first global key entry
             local global_key_id="global-$(date +%Y%m%d%H%M%S)-$$"
+            log_info "🔧 DEBUG: Creating first global key entry with ID: $global_key_id"
+            
+            log_info "🔧 DEBUG: Executing jq command to create first entry..."
             jq --arg id "$global_key_id" --arg host "$host" --arg username "$username" --arg port "$port" --arg now "$now" \
                 '.global_keys = [{
                     "id": $id,
@@ -1099,17 +1181,41 @@ add_global_key_to_registry() {
                     }]
                 }] |
                 .last_updated = $now' \
-                "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp" && mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+                "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp"
             
-            if [[ $? -eq 0 ]]; then
-                log_info "✅ Added first server to global keys registry"
+            local jq_result=$?
+            log_info "🔧 DEBUG: jq create result: $jq_result"
+            
+            if [[ $jq_result -eq 0 ]] && [[ -f "${GLOBAL_KEYS_REGISTRY}.tmp" ]]; then
+                local temp_size=$(stat -c%s "${GLOBAL_KEYS_REGISTRY}.tmp" 2>/dev/null || echo "0")
+                log_info "🔧 DEBUG: Temp file created, size: ${temp_size} bytes"
+                log_info "🔧 DEBUG: Temp file preview: $(head -n 5 "${GLOBAL_KEYS_REGISTRY}.tmp" 2>/dev/null | tr '\n' ' ')"
+                
+                log_info "🔧 DEBUG: Moving temp file to registry..."
+                mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+                local mv_result=$?
+                log_info "🔧 DEBUG: mv result: $mv_result"
+                
+                if [[ $mv_result -eq 0 ]]; then
+                    log_info "🔧 DEBUG: Final registry size: $(stat -c%s "$GLOBAL_KEYS_REGISTRY" 2>/dev/null || echo "0") bytes"
+                    log_info "🔧 DEBUG: Final registry content: $(cat "$GLOBAL_KEYS_REGISTRY" 2>/dev/null | head -n 10 | tr '\n' ' ')"
+                    log_info "✅ Added first server to global keys registry"
+                else
+                    log_info "❌ DEBUG: Failed to move temp file"
+                    log_info "❌ Failed to add server to global keys registry"
+                    rm -f "${GLOBAL_KEYS_REGISTRY}.tmp" 2>/dev/null
+                    return 1
+                fi
             else
+                log_info "❌ DEBUG: jq command failed or temp file not created"
+                log_info "❌ DEBUG: Temp file exists: $([ -f "${GLOBAL_KEYS_REGISTRY}.tmp" ] && echo "yes" || echo "no")"
                 log_info "❌ Failed to add server to global keys registry"
                 rm -f "${GLOBAL_KEYS_REGISTRY}.tmp" 2>/dev/null
                 return 1
             fi
         else
             # Add server to existing global key entry
+            log_info "🔧 DEBUG: Adding server to existing global key entry..."
             jq --arg host "$host" --arg username "$username" --arg port "$port" --arg now "$now" \
                 '.global_keys[0].servers += [{
                     "host": $host,
@@ -1120,11 +1226,28 @@ add_global_key_to_registry() {
                     "status": "active"
                 }] |
                 .last_updated = $now' \
-                "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp" && mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+                "$GLOBAL_KEYS_REGISTRY" > "${GLOBAL_KEYS_REGISTRY}.tmp"
+            
+            local jq_result=$?
+            log_info "🔧 DEBUG: jq add-to-existing result: $jq_result"
+            
+            if [[ $jq_result -eq 0 ]] && [[ -f "${GLOBAL_KEYS_REGISTRY}.tmp" ]]; then
+                log_info "🔧 DEBUG: Moving temp file to registry..."
+                mv "${GLOBAL_KEYS_REGISTRY}.tmp" "$GLOBAL_KEYS_REGISTRY"
+                local mv_result=$?
+                log_info "🔧 DEBUG: mv result: $mv_result"
                 
-            if [[ $? -eq 0 ]]; then
-                log_info "✅ Added server to existing global keys registry"
+                if [[ $mv_result -eq 0 ]]; then
+                    log_info "🔧 DEBUG: Registry after adding server: $(cat "$GLOBAL_KEYS_REGISTRY" 2>/dev/null | head -n 10 | tr '\n' ' ')"
+                    log_info "✅ Added server to existing global keys registry"
+                else
+                    log_info "❌ DEBUG: Failed to move temp file"
+                    log_info "❌ Failed to add server to global keys registry"
+                    rm -f "${GLOBAL_KEYS_REGISTRY}.tmp" 2>/dev/null
+                    return 1
+                fi
             else
+                log_info "❌ DEBUG: jq command failed or temp file not created"
                 log_info "❌ Failed to add server to global keys registry"
                 rm -f "${GLOBAL_KEYS_REGISTRY}.tmp" 2>/dev/null
                 return 1
@@ -1132,6 +1255,7 @@ add_global_key_to_registry() {
         fi
     fi
     
+    log_info "🔧 DEBUG: Registry operation completed successfully"
     debug_log "Added ${username}@${host}:${port} to global keys registry"
 }
 
@@ -1377,6 +1501,38 @@ revoke_global_key_from_server() {
     # Attempt to remove key from remote server if reachable
     if [[ "$server_reachable" == "true" ]]; then
         log_info "🔄 Attempting to remove global SSH key from remote server..."
+        
+        # Add SSH key discovery debugging
+        log_info "🔧 SSH DEBUG: Available SSH keys in /root/.ssh:"
+        ls -la /root/.ssh/id_* 2>/dev/null | while read -r line; do
+            log_info "🔧 SSH DEBUG: $line"
+        done
+        
+        if [[ -f "/root/.ssh/id_ed25519" ]]; then
+            log_info "🔧 SSH DEBUG: Global private key exists: /root/.ssh/id_ed25519"
+            log_info "🔧 SSH DEBUG: Global private key permissions: $(stat -c "%a %n" /root/.ssh/id_ed25519 2>/dev/null || echo "stat failed")"
+        else
+            log_info "🔧 SSH DEBUG: Global private key NOT found: /root/.ssh/id_ed25519"
+        fi
+        
+        if [[ -f "/root/.ssh/id_ed25519.pub" ]]; then
+            log_info "🔧 SSH DEBUG: Global public key exists: /root/.ssh/id_ed25519.pub"
+            log_info "🔧 SSH DEBUG: Global public key content: $(cat /root/.ssh/id_ed25519.pub 2>/dev/null | head -c 100)..."
+        else
+            log_info "🔧 SSH DEBUG: Global public key NOT found: /root/.ssh/id_ed25519.pub"
+        fi
+        
+        log_info "🔧 SSH DEBUG: SSH agent status:"
+        ssh-add -l 2>/dev/null | while read -r line; do
+            log_info "🔧 SSH DEBUG: Agent key: $line"
+        done || log_info "🔧 SSH DEBUG: No SSH agent or no keys in agent"
+        
+        log_info "🔧 SSH DEBUG: Executing SSH command with default key discovery..."
+        
+        # First try with verbose output for debugging (capturing stderr)
+        log_info "🔧 SSH DEBUG: Testing SSH connection with verbose output..."
+        local ssh_verbose_output=$(timeout 30 ssh -v -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 "${username}@${host}" "echo 'SSH connection test'" 2>&1 || true)
+        log_info "🔧 SSH DEBUG: Verbose SSH output (first 500 chars): ${ssh_verbose_output:0:500}"
         
         # Use SSH to remove our key from remote authorized_keys (use default key discovery)
         if timeout 30 ssh -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 "${username}@${host}" \
