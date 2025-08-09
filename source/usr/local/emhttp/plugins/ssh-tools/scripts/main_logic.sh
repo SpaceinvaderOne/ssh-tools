@@ -1063,7 +1063,7 @@ exchange_global_ssh_key() {
     # Test with verbose output first
     log_info "🔧 SSH DEBUG: Testing global key access with verbose output..."
     local test_verbose_output=$(timeout 10 ssh -v -p "$port" -o BatchMode=yes -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${username}@${host}" "echo 'Global key test'" 2>&1 || true)
-    log_info "🔧 SSH DEBUG: Global key test verbose output (first 500 chars): ${test_verbose_output:0:500}"
+    log_info "🔧 SSH DEBUG: Global key test verbose output (first 3000 chars): ${test_verbose_output:0:3000}"
     
     if ssh -p "$port" -o BatchMode=yes -o PubkeyAcceptedKeyTypes=ssh-ed25519 -o PreferredAuthentications=publickey -o ConnectTimeout=10 -o StrictHostKeyChecking=no "${username}@${host}" true >/dev/null 2>&1; then
         log_info "✅ Global SSH key access verified"
@@ -1529,18 +1529,51 @@ revoke_global_key_from_server() {
         
         log_info "🔧 SSH DEBUG: Executing SSH command with default key discovery..."
         
-        # First try with verbose output for debugging (capturing stderr)
-        log_info "🔧 SSH DEBUG: Testing SSH connection with verbose output..."
+        # First inspect remote server authorized_keys state
+        log_info "🔧 REMOTE DEBUG: Inspecting remote server authorized_keys file..."
+        local remote_keys_output=$(timeout 15 ssh -v -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 "${username}@${host}" "echo 'Remote authorized_keys inspection:'; cat ~/.ssh/authorized_keys 2>/dev/null || echo 'No authorized_keys file'; echo 'Key count:'; wc -l ~/.ssh/authorized_keys 2>/dev/null || echo '0'" 2>&1 || true)
+        log_info "🔧 REMOTE DEBUG: Remote keys inspection output: ${remote_keys_output}"
+        
+        # Test manual SSH connection with explicit global key
+        log_info "🔧 MANUAL TEST: Testing explicit global key connection..."
+        local manual_ssh_test=$(timeout 15 ssh -i "$GLOBAL_SSH_KEY_PATH" -v -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o IdentityAgent=none -o ConnectTimeout=10 "${username}@${host}" "echo 'Manual global key test successful'" 2>&1 || true)
+        if echo "$manual_ssh_test" | grep -q "Manual global key test successful"; then
+            log_info "🔧 MANUAL TEST: ✅ Explicit global key connection WORKS"
+            log_info "🔧 MANUAL TEST: Manual connection output (first 1000 chars): ${manual_ssh_test:0:1000}"
+        else
+            log_info "🔧 MANUAL TEST: ❌ Explicit global key connection FAILED"
+            log_info "🔧 MANUAL TEST: Manual connection failure output (first 2000 chars): ${manual_ssh_test:0:2000}"
+        fi
+        
+        # First try with verbose output for debugging (capturing stderr)  
+        log_info "🔧 SSH DEBUG: Testing SSH connection with default key discovery..."
         local ssh_verbose_output=$(timeout 30 ssh -v -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 "${username}@${host}" "echo 'SSH connection test'" 2>&1 || true)
-        log_info "🔧 SSH DEBUG: Verbose SSH output (first 500 chars): ${ssh_verbose_output:0:500}"
+        log_info "🔧 SSH DEBUG: Default discovery verbose output (first 3000 chars): ${ssh_verbose_output:0:3000}"
         
         # Use SSH to remove our key from remote authorized_keys (use default key discovery)
+        log_info "🔧 REMOVAL: Attempting key removal with default SSH discovery..."
         if timeout 30 ssh -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10 "${username}@${host}" \
            "sed -i '/$our_key_material/d' ~/.ssh/authorized_keys 2>/dev/null && echo 'Key removal attempted'" >/dev/null 2>&1; then
-            log_info "✓ Successfully removed global SSH key from remote server"
+            log_info "✓ Successfully removed global SSH key from remote server (default discovery)"
             key_removal_success=true
         else
-            log_info "⚠️ Could not remove key from remote server (SSH connection failed)"
+            log_info "⚠️ Default SSH discovery failed - trying explicit global key fallback..."
+            
+            # Fallback: Try explicit global key specification
+            if [[ -f "$GLOBAL_SSH_KEY_PATH" ]]; then
+                log_info "🔧 FALLBACK: Attempting key removal with explicit global key specification..."
+                if timeout 30 ssh -i "$GLOBAL_SSH_KEY_PATH" -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -o IdentityAgent=none -o ConnectTimeout=10 "${username}@${host}" \
+                   "sed -i '/$our_key_material/d' ~/.ssh/authorized_keys 2>/dev/null && echo 'Key removal attempted'" >/dev/null 2>&1; then
+                    log_info "✓ Successfully removed global SSH key from remote server (explicit key fallback)"
+                    key_removal_success=true
+                else
+                    log_info "❌ FALLBACK: Explicit global key specification also failed"
+                    log_info "⚠️ Could not remove key from remote server (both methods failed)"
+                fi
+            else
+                log_info "❌ FALLBACK: Global private key not found at $GLOBAL_SSH_KEY_PATH"
+                log_info "⚠️ Could not remove key from remote server (SSH connection failed)"
+            fi
         fi
     fi
     
